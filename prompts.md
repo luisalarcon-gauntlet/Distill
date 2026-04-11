@@ -185,7 +185,7 @@ Use llmJSON from lib/llm.ts. Request max_tokens of 8192 for compile/ingest, 4096
 
 ---
 
-## Prompt 7: API Routes — Browse & Brains
+## Prompt 7: API Routes — Browse & Brains ✅
 
 ```
 Create these Next.js App Router API routes:
