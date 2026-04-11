@@ -39,15 +39,19 @@ npm run dev
 ## Code Structure
 
 ```
-src/
-├── app/              # Next.js app router
-│   ├── api/          # REST API routes
-│   └── page.tsx      # Entry point
-├── components/       # React components
-│   └── WikiApp.tsx   # Main UI
-└── lib/              # Core logic
-    ├── llm.ts        # LLM provider abstraction (Claude / OpenAI)
-    ├── papers.ts     # Semantic Scholar + arXiv client
-    ├── compiler.ts   # Wiki compilation engine
-    └── db.ts         # SQLite storage layer
+app/                  # Next.js App Router
+  api/
+    browse/           # Directory picker endpoint
+    brains/           # Brain CRUD + ingest, lint, query, export
+  page.tsx            # Entry point
+  layout.tsx          # Root layout with fonts
+  globals.css         # CSS variables and Tailwind
+components/
+  WikiApp.tsx         # Main UI (brain selector, create flow, wiki viewer)
+lib/
+  llm.ts             # LLM provider abstraction (Claude / OpenAI)
+  papers.ts           # Semantic Scholar + arXiv client
+  compiler.ts         # Wiki compilation engine (LLM prompts)
+  config.ts           # Brain registry (~/.distill/config.json)
+  wiki-fs.ts          # Filesystem layer (read/write .md files)
 ```

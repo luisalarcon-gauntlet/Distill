@@ -2,15 +2,15 @@
 
 **Turn any research topic into a living knowledge wiki.**
 
-Distill implements the [compiled wiki pattern](https://github.com/karpathy/LLM-Wiki) — instead of re-deriving knowledge on every query (like RAG), it uses an LLM to incrementally build and maintain a persistent, interlinked wiki from academic papers.
+Distill implements the [compiled wiki pattern](https://github.com/karpathy/LLM-Wiki) — instead of re-deriving knowledge on every query (like RAG), it uses an LLM to incrementally build and maintain a persistent, interlinked wiki from academic papers. Every wiki is a folder of real markdown files on your filesystem.
 
-Enter a topic → Distill pulls papers from Semantic Scholar → an LLM compiles them into cross-referenced wiki pages (concepts, entities, source summaries) → you browse, explore, and keep building.
+Enter a topic. Distill pulls papers from Semantic Scholar, compiles them into cross-referenced wiki pages (concepts, entities, source summaries), and writes them as `.md` files you can open in any editor or Obsidian.
 
 ## Why
 
-Most AI + documents tools are stateless. Upload files, ask a question, get an answer. Nothing accumulates. Distill is the opposite: every paper you add makes the wiki richer. Cross-references are built once. Contradictions are flagged. Synthesis compounds.
+Most AI + documents tools are stateless. Upload files, ask a question, get an answer. Nothing accumulates.
 
-The tedious part of maintaining a knowledge base isn't reading — it's bookkeeping. Distill handles that.
+Distill is the opposite: every paper you add makes the wiki richer. Cross-references are built once. Contradictions are flagged. Synthesis compounds. The tedious part of maintaining a knowledge base isn't reading — it's bookkeeping. Distill handles that.
 
 ## Quick Start
 
@@ -30,13 +30,6 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-### Docker
-
-```bash
-docker build -t distill .
-docker run -p 3000:3000 --env-file .env.local distill
-```
-
 ## Configuration
 
 Distill supports **BYO API key** — bring your own Claude or OpenAI key:
@@ -45,6 +38,10 @@ Distill supports **BYO API key** — bring your own Claude or OpenAI key:
 # Use ONE of these:
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
+
+# Optional: override default models
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
+OPENAI_MODEL=gpt-4o
 ```
 
 It'll use whichever is set. Anthropic is preferred if both are present.
@@ -53,9 +50,9 @@ It'll use whichever is set. Anthropic is preferred if both are present.
 
 **Three layers** (following the [LLM Wiki architecture](https://github.com/karpathy/LLM-Wiki)):
 
-1. **Sources** — Papers pulled from Semantic Scholar / arXiv. Immutable. Your source of truth.
-2. **The Wiki** — LLM-generated markdown pages: overviews, concept pages, entity pages, source summaries. All interlinked. The LLM owns this layer.
-3. **The Schema** — The prompts and conventions that tell the LLM how to compile, update, and maintain the wiki.
+1. **Sources** — Papers pulled from Semantic Scholar / arXiv. Saved as raw markdown in `raw/`. Immutable.
+2. **The Wiki** — LLM-generated markdown pages: overviews, concept pages, entity pages, source summaries. All interlinked with `[[Wiki Links]]`. Stored in `wiki/`.
+3. **The Schema** — The `SCHEMA.md` file and prompts that tell the LLM how to compile, update, and maintain the wiki.
 
 **Three operations:**
 
@@ -63,40 +60,39 @@ It'll use whichever is set. Anthropic is preferred if both are present.
 - **Ingest** — Add a new paper to an existing wiki. The LLM reads it, updates existing pages, creates new ones.
 - **Lint** — Health-check the wiki: find contradictions, orphan pages, missing cross-references, gaps.
 
-## API
-
-All operations are exposed as REST endpoints:
+## API Endpoints
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/search?q=...` | GET | Search Semantic Scholar |
-| `/api/generate` | POST | Create a new wiki from a topic |
-| `/api/projects` | GET | List all wikis |
-| `/api/projects/:id` | GET | Get wiki with all pages, sources, log |
-| `/api/projects/:id/ingest` | POST | Add a paper to an existing wiki |
-| `/api/projects/:id/lint` | POST | Health-check a wiki |
+| `/api/browse?path=...` | GET | Browse directories (for brain creation) |
+| `/api/brains` | GET | List all brains |
+| `/api/brains` | POST | Create a new brain |
+| `/api/brains/:id` | GET | Load brain with pages and log |
+| `/api/brains/:id` | DELETE | Unregister brain (files stay on disk) |
+| `/api/brains/:id/ingest` | POST | Add a paper to an existing wiki |
+| `/api/brains/:id/lint` | POST | Health-check a wiki |
+| `/api/brains/:id/query` | POST | Ask a question using wiki context |
+| `/api/brains/:id/export` | GET | Download brain as tar.gz |
 
 ## Tech Stack
 
-- **Next.js 14** — App router, API routes, React frontend
-- **SQLite** (better-sqlite3) — Zero-config persistent storage
+- **Next.js 14** — App Router, API routes, React frontend
+- **Markdown + gray-matter** — Real `.md` files with YAML frontmatter, no database
 - **Semantic Scholar API** — Free academic paper search, no auth required
-- **Anthropic / OpenAI** — BYO key, provider abstraction
+- **Anthropic / OpenAI** — BYO key, provider abstraction via raw fetch
 
 ## Roadmap
 
-- [ ] Markdown export (Obsidian-compatible vault)
+- [ ] Obsidian export (already compatible — open the brain folder as a vault)
 - [ ] PDF upload + ingestion
-- [ ] Full-text arXiv paper reading
-- [ ] Collaborative wikis (share link)
-- [ ] Wiki search (BM25 + embeddings)
-- [ ] Citation graph visualization
 - [ ] Google Scholar integration
 - [ ] Ollama / local model support
+- [ ] Citation graph visualization
+- [ ] Collaborative wikis (share link)
 
 ## Inspired By
 
-- [LLM Wiki](https://github.com/karpathy/LLM-Wiki) by Andrej Karpathy — the pattern this implements
+- [LLM Wiki](https://github.com/karpathy/LLM-Wiki) by Andrej Karpathy — the compiled wiki pattern this implements
 - [Vannevar Bush's Memex](https://en.wikipedia.org/wiki/Memex) (1945) — the original vision of a personal knowledge store with associative trails
 
 ## License

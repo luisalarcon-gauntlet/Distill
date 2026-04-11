@@ -324,7 +324,7 @@ Navigation: clicking a [[Wiki Link]] should try exact ID match, then slugified m
 
 ---
 
-## Prompt 11: README & Open Source Files
+## Prompt 11: README & Open Source Files ✅
 
 ```
 Create these files for the open source repo:
