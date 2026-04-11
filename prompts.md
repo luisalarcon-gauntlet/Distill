@@ -356,7 +356,7 @@ LICENSE — MIT license, Copyright 2026 Distill Contributors
 
 ---
 
-## Prompt 12: Testing & Polish
+## Prompt 12: Testing & Polish ✅
 
 ```
 Run the application with `npm run dev` and test these flows:
