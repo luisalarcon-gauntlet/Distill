@@ -49,3 +49,33 @@ export async function GET(request: Request) {
     );
   }
 }
+
+export async function POST(request: Request) {
+  try {
+    const { parent, name } = await request.json();
+    if (!parent || !name) {
+      return NextResponse.json({ error: "parent and name are required" }, { status: 400 });
+    }
+
+    // Sanitize folder name
+    const safeName = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, "").trim();
+    if (!safeName) {
+      return NextResponse.json({ error: "Invalid folder name" }, { status: 400 });
+    }
+
+    const fullPath = path.join(path.resolve(parent), safeName);
+
+    if (fs.existsSync(fullPath)) {
+      return NextResponse.json({ error: "Folder already exists" }, { status: 409 });
+    }
+
+    fs.mkdirSync(fullPath, { recursive: true });
+    return NextResponse.json({ path: fullPath });
+  } catch (error: any) {
+    console.error("Create folder error:", error);
+    return NextResponse.json(
+      { error: error.message || "Failed to create folder" },
+      { status: 500 }
+    );
+  }
+}

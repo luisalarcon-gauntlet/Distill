@@ -359,6 +359,9 @@ export default function WikiApp() {
   const [browseDirs, setBrowseDirs] = useState<{ name: string; path: string }[]>([]);
   const [browseParent, setBrowseParent] = useState<string | null>(null);
   const [browseCurrent, setBrowseCurrent] = useState("");
+  const [newFolderMode, setNewFolderMode] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderError, setNewFolderError] = useState("");
 
   // Wiki interaction state
   const [ingestQuery, setIngestQuery] = useState("");
@@ -417,6 +420,29 @@ export default function WikiApp() {
       // ignore
     }
   }, [createDir]);
+
+  const createFolder = useCallback(async () => {
+    if (!newFolderName.trim() || !browseCurrent) return;
+    setNewFolderError("");
+    try {
+      const res = await fetch("/api/browse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parent: browseCurrent, name: newFolderName.trim() }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setNewFolderError(data.error);
+        return;
+      }
+      setNewFolderName("");
+      setNewFolderMode(false);
+      await browseTo(data.path);
+      setCreateDir(data.path);
+    } catch {
+      setNewFolderError("Failed to create folder");
+    }
+  }, [newFolderName, browseCurrent, browseTo]);
 
   const handleCreate = useCallback(async () => {
     if (!createName.trim() || !createTopic.trim() || !createDir) return;
@@ -868,6 +894,98 @@ export default function WikiApp() {
                     No subdirectories
                   </div>
                 )}
+                {/* New Folder */}
+                <div
+                  style={{ borderTop: "1px solid #1e1e2e" }}
+                  className="px-3 py-2"
+                >
+                  {newFolderMode ? (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-2">
+                        <input
+                          autoFocus
+                          value={newFolderName}
+                          onChange={(e) => {
+                            setNewFolderName(e.target.value);
+                            setNewFolderError("");
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") createFolder();
+                            if (e.key === "Escape") {
+                              setNewFolderMode(false);
+                              setNewFolderName("");
+                              setNewFolderError("");
+                            }
+                          }}
+                          placeholder="Folder name"
+                          className="flex-1 px-2 py-1 rounded"
+                          style={{
+                            fontFamily: "IBM Plex Mono",
+                            fontSize: 12,
+                            background: "#0a0a12",
+                            border: "1px solid #2a2a3c",
+                            color: "#e0dfe6",
+                            outline: "none",
+                          }}
+                        />
+                        <button
+                          onClick={createFolder}
+                          className="px-2 py-1 rounded"
+                          style={{
+                            fontFamily: "IBM Plex Mono",
+                            fontSize: 11,
+                            color: "#7ec99a",
+                            background: "rgba(126,201,154,0.1)",
+                            border: "none",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Create
+                        </button>
+                        <button
+                          onClick={() => {
+                            setNewFolderMode(false);
+                            setNewFolderName("");
+                            setNewFolderError("");
+                          }}
+                          className="px-2 py-1 rounded"
+                          style={{
+                            fontFamily: "IBM Plex Mono",
+                            fontSize: 11,
+                            color: "#7a7a8c",
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      {newFolderError && (
+                        <span style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#ff6b6b" }}>
+                          {newFolderError}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setNewFolderMode(true)}
+                      className="flex items-center gap-2 w-full"
+                      style={{
+                        fontFamily: "IBM Plex Mono",
+                        fontSize: 12,
+                        color: "#c4a1ff",
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>+</span>
+                      New Folder
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
