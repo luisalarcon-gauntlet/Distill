@@ -32,7 +32,7 @@ Do NOT use SQLite or any database. Do NOT create a Dockerfile. This app writes m
 
 ---
 
-## Prompt 2: LLM Provider Abstraction
+## Prompt 2: LLM Provider Abstraction ✅
 
 ```
 Create lib/llm.ts — a provider abstraction that supports both Anthropic and OpenAI APIs.
@@ -49,7 +49,7 @@ Requirements:
 
 ---
 
-## Prompt 3: Semantic Scholar Client
+## Prompt 3: Semantic Scholar Client ✅
 
 ```
 Create lib/papers.ts — a client for the Semantic Scholar API (free, no auth needed).
