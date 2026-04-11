@@ -3,30 +3,34 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 // ─── Types ───
+interface BrainConfig {
+  id: string;
+  name: string;
+  path: string;
+  topic: string;
+  created: string;
+  lastOpened: string;
+}
+
 interface WikiPage {
   id: string;
   title: string;
   type: string;
   content: string;
   links: string[];
-  source_count: number;
-  updated_at: string;
+  sources: string[];
+  filepath: string;
+  created: string;
+  updated: string;
 }
 
 interface LogEntry {
+  date: string;
   action: string;
   detail: string;
-  created_at: string;
 }
 
-interface Project {
-  id: string;
-  name: string;
-  topic: string;
-  created_at: string;
-}
-
-type Screen = "home" | "loading" | "wiki";
+type Screen = "brains" | "create" | "loading" | "wiki";
 
 // ─── Graph Component ───
 function WikiGraph({
@@ -144,7 +148,7 @@ function WikiGraph({
         ctx.font = `${isActive ? 11 : 9}px 'IBM Plex Mono', monospace`;
         ctx.fillStyle = isActive ? "#e0dfe6" : "#4a4a5c";
         ctx.textAlign = "center";
-        const label = p.title.length > 22 ? p.title.slice(0, 20) + "…" : p.title;
+        const label = p.title.length > 22 ? p.title.slice(0, 20) + "..." : p.title;
         ctx.fillText(label, n.x, n.y + r + 14);
       });
 
@@ -179,7 +183,13 @@ function WikiGraph({
 }
 
 // ─── Page Renderer ───
-function PageView({ page, onNavigate }: { page: WikiPage; onNavigate: (t: string) => void }) {
+function PageView({
+  page,
+  onNavigate,
+}: {
+  page: WikiPage;
+  onNavigate: (t: string) => void;
+}) {
   const typeColor: Record<string, string> = {
     overview: "#c4a1ff",
     concept: "#90c4ff",
@@ -198,7 +208,12 @@ function PageView({ page, onNavigate }: { page: WikiPage; onNavigate: (t: string
             key={i}
             onClick={() => onNavigate(m[1])}
             className="cursor-pointer"
-            style={{ color: "#90c4ff", borderBottom: "1px solid rgba(144,196,255,0.2)", fontFamily: "IBM Plex Mono, monospace", fontSize: 13 }}
+            style={{
+              color: "#90c4ff",
+              borderBottom: "1px solid rgba(144,196,255,0.2)",
+              fontFamily: "IBM Plex Mono, monospace",
+              fontSize: 13,
+            }}
           >
             {m[1]}
           </span>
@@ -208,35 +223,43 @@ function PageView({ page, onNavigate }: { page: WikiPage; onNavigate: (t: string
         const key = `${i}-${j}`;
         if (line.startsWith("## "))
           return (
-            <h3 key={key} className="mt-6 mb-2 font-semibold" style={{ fontFamily: "IBM Plex Mono", fontSize: 15, color: "#e0dfe6" }}>
+            <h3
+              key={key}
+              className="mt-6 mb-2 font-semibold"
+              style={{ fontFamily: "IBM Plex Mono", fontSize: 15, color: "#e0dfe6" }}
+            >
               {line.slice(3)}
             </h3>
           );
         if (line.startsWith("- "))
           return (
             <div key={key} className="pl-4 my-1" style={{ fontSize: 14, lineHeight: 1.6 }}>
-              <span style={{ color: "#4a4a5c", marginRight: 8 }}>›</span>
+              <span style={{ color: "#4a4a5c", marginRight: 8 }}>&#8250;</span>
               {renderInline(line.slice(2))}
             </div>
           );
         if (line.startsWith("|"))
           return (
-            <div key={key} style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: "#7a7a8c", lineHeight: 1.8 }}>
+            <div
+              key={key}
+              style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: "#7a7a8c", lineHeight: 1.8 }}
+            >
               {line}
             </div>
           );
-        if (line.startsWith("→"))
-          return (
-            <div key={key} className="mt-3" style={{ fontSize: 13, color: "#4a4a5c", fontFamily: "IBM Plex Mono" }}>
-              {line}
-            </div>
-          );
+        if (line.startsWith("```") || line.endsWith("```")) return null;
         if (line.startsWith("`") && line.endsWith("`"))
           return (
             <div
               key={key}
               className="my-2 px-3 py-2 rounded-md"
-              style={{ fontFamily: "IBM Plex Mono", fontSize: 12, background: "rgba(196,161,255,0.06)", color: "#c4a1ff", border: "1px solid #1e1e2e" }}
+              style={{
+                fontFamily: "IBM Plex Mono",
+                fontSize: 12,
+                background: "rgba(196,161,255,0.06)",
+                color: "#c4a1ff",
+                border: "1px solid #1e1e2e",
+              }}
             >
               {line.slice(1, -1)}
             </div>
@@ -264,24 +287,34 @@ function PageView({ page, onNavigate }: { page: WikiPage; onNavigate: (t: string
 
   return (
     <div>
-      <div className="flex items-center gap-2.5 mb-5">
+      <div className="flex items-center gap-2.5 mb-1">
         <span
           className="uppercase text-[10px] tracking-widest px-2 py-0.5 rounded"
-          style={{ color: typeColor[page.type] || "#7a7a8c", background: `${typeColor[page.type] || "#7a7a8c"}15`, fontFamily: "IBM Plex Mono" }}
+          style={{
+            color: typeColor[page.type] || "#7a7a8c",
+            background: `${typeColor[page.type] || "#7a7a8c"}15`,
+            fontFamily: "IBM Plex Mono",
+          }}
         >
           {page.type}
         </span>
         <span style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#4a4a5c" }}>
-          {page.source_count} sources
+          {page.filepath}
         </span>
       </div>
-      <h2 className="mb-5 font-semibold" style={{ fontFamily: "IBM Plex Mono", fontSize: 22, lineHeight: 1.3, color: "#e0dfe6" }}>
+      <h2
+        className="mb-5 mt-3 font-semibold"
+        style={{ fontFamily: "IBM Plex Mono", fontSize: 22, lineHeight: 1.3, color: "#e0dfe6" }}
+      >
         {page.title}
       </h2>
-      <div>{renderContent(page.content)}</div>
+      <div style={{ color: "#b0afba" }}>{renderContent(page.content)}</div>
       {page.links?.length > 0 && (
         <div className="mt-7 pt-4" style={{ borderTop: "1px solid #1e1e2e" }}>
-          <div className="mb-2 uppercase tracking-widest" style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#4a4a5c" }}>
+          <div
+            className="mb-2 uppercase tracking-widest"
+            style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#4a4a5c" }}
+          >
             Linked Pages
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -290,7 +323,12 @@ function PageView({ page, onNavigate }: { page: WikiPage; onNavigate: (t: string
                 key={l}
                 onClick={() => onNavigate(l)}
                 className="cursor-pointer px-2.5 py-1 rounded"
-                style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: "#90c4ff", background: "#2a2a3e" }}
+                style={{
+                  fontFamily: "IBM Plex Mono",
+                  fontSize: 12,
+                  color: "#90c4ff",
+                  background: "#2a2a3e",
+                }}
               >
                 {l}
               </span>
@@ -304,171 +342,587 @@ function PageView({ page, onNavigate }: { page: WikiPage; onNavigate: (t: string
 
 // ─── Main App ───
 export default function WikiApp() {
-  const [screen, setScreen] = useState<Screen>("home");
-  const [topic, setTopic] = useState("");
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [screen, setScreen] = useState<Screen>("brains");
+  const [brains, setBrains] = useState<BrainConfig[]>([]);
+  const [activeBrain, setActiveBrain] = useState<BrainConfig | null>(null);
   const [pages, setPages] = useState<WikiPage[]>([]);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [activePage, setActivePage] = useState<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState<"pages" | "graph" | "log">("pages");
   const [error, setError] = useState<string | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
+
+  // Create form state
+  const [createName, setCreateName] = useState("");
+  const [createTopic, setCreateTopic] = useState("");
+  const [createDir, setCreateDir] = useState("");
+  const [autoCompile, setAutoCompile] = useState(true);
+  const [browseDirs, setBrowseDirs] = useState<{ name: string; path: string }[]>([]);
+  const [browseParent, setBrowseParent] = useState<string | null>(null);
+  const [browseCurrent, setBrowseCurrent] = useState("");
+
+  // Wiki interaction state
   const [ingestQuery, setIngestQuery] = useState("");
   const [ingesting, setIngesting] = useState(false);
+  const [queryText, setQueryText] = useState("");
+  const [querying, setQuerying] = useState(false);
+  const [queryAnswer, setQueryAnswer] = useState<string | null>(null);
+  const [lintResult, setLintResult] = useState<{
+    issues: { type: string; description: string; page?: string }[];
+    suggestions: string[];
+  } | null>(null);
+  const [linting, setLinting] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState("");
 
-  // Load existing projects on mount
+  // Load brains on mount
   useEffect(() => {
-    fetch("/api/projects")
-      .then((r) => r.json())
-      .then((d) => setProjects(d.projects || []))
-      .catch(() => {});
+    loadBrains();
   }, []);
 
-  const loadProject = useCallback(async (id: string) => {
-    const res = await fetch(`/api/projects/${id}`);
-    const data = await res.json();
-    if (data.pages) {
-      setProjectId(id);
-      setPages(data.pages);
+  const loadBrains = async () => {
+    try {
+      const res = await fetch("/api/brains");
+      const data = await res.json();
+      setBrains(data.brains || []);
+    } catch {
+      // ignore
+    }
+  };
+
+  const loadBrain = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/brains/${id}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setActiveBrain(data.brain);
+      setPages(data.pages || []);
       setLog(data.log || []);
-      const overview = data.pages.find((p: WikiPage) => p.type === "overview");
-      setActivePage(overview?.id || data.pages[0]?.id || null);
+      const overview = (data.pages || []).find((p: WikiPage) => p.type === "overview");
+      setActivePage(overview?.id || data.pages?.[0]?.id || null);
       setScreen("wiki");
+    } catch (e: any) {
+      setError(e.message);
     }
   }, []);
 
-  const handleGenerate = useCallback(async () => {
-    if (!topic.trim()) return;
+  const browseTo = useCallback(async (dirPath?: string) => {
+    try {
+      const url = dirPath ? `/api/browse?path=${encodeURIComponent(dirPath)}` : "/api/browse";
+      const res = await fetch(url);
+      const data = await res.json();
+      setBrowseDirs(data.dirs || []);
+      setBrowseParent(data.parent || null);
+      setBrowseCurrent(data.current || "");
+      if (!createDir) setCreateDir(data.current || "");
+    } catch {
+      // ignore
+    }
+  }, [createDir]);
+
+  const handleCreate = useCallback(async () => {
+    if (!createName.trim() || !createTopic.trim() || !createDir) return;
     setScreen("loading");
+    setLoadingMessage(
+      autoCompile
+        ? `Creating brain and compiling wiki for "${createTopic}"...`
+        : `Creating brain "${createName}"...`
+    );
     setError(null);
     try {
-      const res = await fetch("/api/generate", {
+      const res = await fetch("/api/brains", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic }),
+        body: JSON.stringify({
+          name: createName,
+          topic: createTopic,
+          directory: createDir,
+          autoCompile,
+        }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      await loadProject(data.projectId);
+      await loadBrains();
+      await loadBrain(data.brain.id);
     } catch (e: any) {
       setError(e.message);
-      setScreen("home");
+      setScreen("create");
     }
-  }, [topic, loadProject]);
+  }, [createName, createTopic, createDir, autoCompile, loadBrain]);
+
+  const handleRemoveBrain = useCallback(
+    async (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      try {
+        await fetch(`/api/brains/${id}`, { method: "DELETE" });
+        await loadBrains();
+      } catch {
+        // ignore
+      }
+    },
+    []
+  );
 
   const handleIngest = useCallback(async () => {
-    if (!ingestQuery.trim() || !projectId) return;
+    if (!ingestQuery.trim() || !activeBrain) return;
     setIngesting(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/ingest`, {
+      const res = await fetch(`/api/brains/${activeBrain.id}/ingest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: ingestQuery }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      await loadProject(projectId);
+      await loadBrain(activeBrain.id);
       setIngestQuery("");
     } catch (e: any) {
       setError(e.message);
     } finally {
       setIngesting(false);
     }
-  }, [ingestQuery, projectId, loadProject]);
+  }, [ingestQuery, activeBrain, loadBrain]);
+
+  const handleQuery = useCallback(async () => {
+    if (!queryText.trim() || !activeBrain) return;
+    setQuerying(true);
+    setQueryAnswer(null);
+    try {
+      const res = await fetch(`/api/brains/${activeBrain.id}/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: queryText }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setQueryAnswer(data.answer);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setQuerying(false);
+    }
+  }, [queryText, activeBrain]);
+
+  const handleSaveQueryAsPage = useCallback(async () => {
+    if (!queryText.trim() || !activeBrain) return;
+    try {
+      const res = await fetch(`/api/brains/${activeBrain.id}/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: queryText, saveAsPage: true }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      await loadBrain(activeBrain.id);
+      setQueryAnswer(null);
+      setQueryText("");
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }, [queryText, activeBrain, loadBrain]);
+
+  const handleLint = useCallback(async () => {
+    if (!activeBrain) return;
+    setLinting(true);
+    setLintResult(null);
+    try {
+      const res = await fetch(`/api/brains/${activeBrain.id}/lint`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setLintResult(data);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLinting(false);
+    }
+  }, [activeBrain]);
+
+  const handleExport = useCallback(async () => {
+    if (!activeBrain) return;
+    window.open(`/api/brains/${activeBrain.id}/export`, "_blank");
+  }, [activeBrain]);
 
   const handleNavigate = useCallback(
     (target: string) => {
       if (!pages.length) return;
       const exact = pages.find((p) => p.id === target);
-      if (exact) { setActivePage(target); return; }
-      const slug = target.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+      if (exact) {
+        setActivePage(target);
+        return;
+      }
+      const slug = target
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "");
       const bySlug = pages.find((p) => p.id === slug);
-      if (bySlug) { setActivePage(bySlug.id); return; }
-      const fuzzy = pages.find((p) => p.title.toLowerCase().includes(target.toLowerCase()));
+      if (bySlug) {
+        setActivePage(bySlug.id);
+        return;
+      }
+      const fuzzy = pages.find((p) =>
+        p.title.toLowerCase().includes(target.toLowerCase())
+      );
       if (fuzzy) setActivePage(fuzzy.id);
     },
     [pages]
   );
 
-  // ─── HOME ───
-  if (screen === "home") {
+  const slugify = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+
+  // ─── BRAIN SELECTOR ───
+  if (screen === "brains") {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
-        <div className="max-w-xl w-full">
-          <div className="mb-12">
-            <div className="uppercase tracking-[0.15em] mb-3" style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#8b6fc0" }}>
+        <div className="max-w-3xl w-full">
+          <div className="mb-10">
+            <div
+              className="uppercase tracking-[0.15em] mb-3"
+              style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#8b6fc0" }}
+            >
               Distill
             </div>
-            <h1 className="font-semibold leading-tight" style={{ fontFamily: "IBM Plex Mono", fontSize: 36, color: "#e0dfe6" }}>
-              Turn any research topic into a living knowledge wiki
+            <h1
+              className="font-semibold leading-tight"
+              style={{ fontFamily: "IBM Plex Mono", fontSize: 32, color: "#e0dfe6" }}
+            >
+              Your Brains
             </h1>
-            <p className="mt-4" style={{ fontSize: 15, color: "#7a7a8c", lineHeight: 1.6 }}>
-              Enter a topic. Distill pulls papers from Semantic Scholar and compiles them into an interlinked, browsable wiki — concepts, entities, sources, all cross-referenced. BYO API key (Claude or OpenAI).
+            <p className="mt-2" style={{ fontSize: 14, color: "#7a7a8c", lineHeight: 1.6 }}>
+              Each brain is a self-contained knowledge wiki on your filesystem
             </p>
           </div>
 
           {error && (
-            <div className="mb-4 px-4 py-3 rounded-lg text-sm" style={{ background: "rgba(212,106,106,0.1)", color: "#d46a6a", border: "1px solid rgba(212,106,106,0.2)" }}>
+            <div
+              className="mb-4 px-4 py-3 rounded-lg text-sm"
+              style={{
+                background: "rgba(212,106,106,0.1)",
+                color: "#d46a6a",
+                border: "1px solid rgba(212,106,106,0.2)",
+              }}
+            >
+              {error}
+              <button
+                onClick={() => setError(null)}
+                className="float-right"
+                style={{ background: "none", border: "none", color: "#d46a6a", cursor: "pointer" }}
+              >
+                x
+              </button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {brains.map((brain) => (
+              <div
+                key={brain.id}
+                onClick={() => loadBrain(brain.id)}
+                className="group relative p-4 rounded-lg cursor-pointer"
+                style={{
+                  background: "#12121a",
+                  border: "1px solid #1e1e2e",
+                  transition: "border-color 0.15s",
+                }}
+                onMouseOver={(e) => (e.currentTarget.style.borderColor = "#c4a1ff40")}
+                onMouseOut={(e) => (e.currentTarget.style.borderColor = "#1e1e2e")}
+              >
+                <div
+                  className="font-medium mb-1"
+                  style={{ fontFamily: "IBM Plex Mono", fontSize: 14, color: "#e0dfe6" }}
+                >
+                  {brain.name}
+                </div>
+                <div className="mb-2" style={{ fontSize: 13, color: "#7a7a8c" }}>
+                  {brain.topic}
+                </div>
+                <div
+                  className="truncate"
+                  style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#4a4a5c" }}
+                >
+                  {brain.path}
+                </div>
+                <button
+                  onClick={(e) => handleRemoveBrain(e, brain.id)}
+                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 px-2 py-0.5 rounded"
+                  style={{
+                    fontFamily: "IBM Plex Mono",
+                    fontSize: 10,
+                    color: "#d46a6a",
+                    background: "rgba(212,106,106,0.1)",
+                    border: "none",
+                    cursor: "pointer",
+                    transition: "opacity 0.15s",
+                  }}
+                >
+                  remove
+                </button>
+              </div>
+            ))}
+
+            {/* New Brain card */}
+            <div
+              onClick={() => {
+                setScreen("create");
+                setCreateName("");
+                setCreateTopic("");
+                setCreateDir("");
+                setError(null);
+                browseTo();
+              }}
+              className="flex items-center justify-center p-4 rounded-lg cursor-pointer"
+              style={{
+                border: "2px dashed #1e1e2e",
+                minHeight: 100,
+                transition: "border-color 0.15s",
+              }}
+              onMouseOver={(e) => (e.currentTarget.style.borderColor = "#c4a1ff40")}
+              onMouseOut={(e) => (e.currentTarget.style.borderColor = "#1e1e2e")}
+            >
+              <div className="text-center">
+                <div style={{ fontSize: 24, color: "#4a4a5c", marginBottom: 4 }}>+</div>
+                <div style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: "#4a4a5c" }}>
+                  New Brain
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── CREATE BRAIN ───
+  if (screen === "create") {
+    const previewPath =
+      createDir && createName
+        ? `${createDir}/${slugify(createName)}/`
+        : null;
+
+    const canCreate = createName.trim() && createTopic.trim() && createDir;
+
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="max-w-lg w-full">
+          <button
+            onClick={() => {
+              setScreen("brains");
+              setError(null);
+            }}
+            className="mb-6"
+            style={{
+              fontFamily: "IBM Plex Mono",
+              fontSize: 13,
+              color: "#8b6fc0",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            &larr; Back
+          </button>
+
+          <h1
+            className="font-semibold mb-8"
+            style={{ fontFamily: "IBM Plex Mono", fontSize: 24, color: "#e0dfe6" }}
+          >
+            Create a New Brain
+          </h1>
+
+          {error && (
+            <div
+              className="mb-4 px-4 py-3 rounded-lg text-sm"
+              style={{
+                background: "rgba(212,106,106,0.1)",
+                color: "#d46a6a",
+                border: "1px solid rgba(212,106,106,0.2)",
+              }}
+            >
               {error}
             </div>
           )}
 
-          <div className="relative">
+          {/* Brain Name */}
+          <div className="mb-5">
+            <label
+              className="block mb-1.5 uppercase tracking-widest"
+              style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#7a7a8c" }}
+            >
+              Brain Name
+            </label>
             <input
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleGenerate()}
-              placeholder="e.g. transformer architecture, CRISPR, dark matter..."
+              value={createName}
+              onChange={(e) => setCreateName(e.target.value)}
+              placeholder="e.g. Transformer Research"
               className="w-full outline-none"
               style={{
-                padding: "16px 120px 16px 20px", fontSize: 15, color: "#e0dfe6",
-                background: "#12121a", border: "1px solid #1e1e2e", borderRadius: 10,
+                padding: "10px 14px",
+                fontSize: 14,
+                color: "#e0dfe6",
+                background: "#12121a",
+                border: "1px solid #1e1e2e",
+                borderRadius: 8,
               }}
             />
-            <button
-              onClick={handleGenerate}
-              className="absolute right-1.5 top-1.5 bottom-1.5 px-5"
-              style={{ fontFamily: "IBM Plex Mono", fontSize: 13, fontWeight: 500, background: "#c4a1ff", color: "#0a0a0f", borderRadius: 7, border: "none", cursor: "pointer" }}
+          </div>
+
+          {/* Research Topic */}
+          <div className="mb-5">
+            <label
+              className="block mb-1.5 uppercase tracking-widest"
+              style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#7a7a8c" }}
             >
-              Compile →
-            </button>
+              Research Topic
+            </label>
+            <input
+              value={createTopic}
+              onChange={(e) => setCreateTopic(e.target.value)}
+              placeholder="e.g. transformer architecture"
+              className="w-full outline-none"
+              style={{
+                padding: "10px 14px",
+                fontSize: 14,
+                color: "#e0dfe6",
+                background: "#12121a",
+                border: "1px solid #1e1e2e",
+                borderRadius: 8,
+              }}
+            />
           </div>
 
-          <div className="mt-4 flex gap-2 flex-wrap">
-            {["Transformer Architecture", "CRISPR Gene Editing", "Reinforcement Learning"].map((s) => (
-              <button
-                key={s}
-                onClick={() => setTopic(s)}
-                className="px-3 py-1.5 rounded-md"
-                style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#4a4a5c", background: "#2a2a3e", border: "1px solid #1e1e2e", cursor: "pointer" }}
+          {/* Directory Picker */}
+          <div className="mb-5">
+            <label
+              className="block mb-1.5 uppercase tracking-widest"
+              style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#7a7a8c" }}
+            >
+              Directory
+            </label>
+            <div
+              className="rounded-lg overflow-hidden"
+              style={{ border: "1px solid #1e1e2e", background: "#12121a" }}
+            >
+              <div
+                className="flex items-center justify-between px-3 py-2"
+                style={{ borderBottom: "1px solid #1e1e2e" }}
               >
-                {s}
-              </button>
-            ))}
+                <span
+                  className="truncate flex-1"
+                  style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: "#7a7a8c" }}
+                >
+                  {browseCurrent || "Loading..."}
+                </span>
+                <button
+                  onClick={() => setCreateDir(browseCurrent)}
+                  className="px-3 py-1 rounded ml-2"
+                  style={{
+                    fontFamily: "IBM Plex Mono",
+                    fontSize: 11,
+                    color: createDir === browseCurrent ? "#7ec99a" : "#c4a1ff",
+                    background:
+                      createDir === browseCurrent
+                        ? "rgba(126,201,154,0.1)"
+                        : "rgba(196,161,255,0.1)",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  {createDir === browseCurrent ? "Selected" : "Select"}
+                </button>
+              </div>
+              <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                {browseParent && (
+                  <div
+                    onClick={() => browseTo(browseParent)}
+                    className="flex items-center gap-2 px-3 py-2 cursor-pointer"
+                    style={{ color: "#7a7a8c", fontSize: 13 }}
+                    onMouseOver={(e) =>
+                      (e.currentTarget.style.background = "rgba(196,161,255,0.05)")
+                    }
+                    onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <span style={{ fontFamily: "IBM Plex Mono", fontSize: 12 }}>..</span>
+                  </div>
+                )}
+                {browseDirs.map((d) => (
+                  <div
+                    key={d.path}
+                    onClick={() => browseTo(d.path)}
+                    className="flex items-center gap-2 px-3 py-2 cursor-pointer"
+                    style={{ color: "#e0dfe6", fontSize: 13 }}
+                    onMouseOver={(e) =>
+                      (e.currentTarget.style.background = "rgba(196,161,255,0.05)")
+                    }
+                    onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <span style={{ color: "#c4a1ff" }}>&#128193;</span>
+                    {d.name}
+                  </div>
+                ))}
+                {browseDirs.length === 0 && !browseParent && (
+                  <div className="px-3 py-3" style={{ fontSize: 12, color: "#4a4a5c" }}>
+                    No subdirectories
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
-          {projects.length > 0 && (
-            <div className="mt-10 pt-6" style={{ borderTop: "1px solid #1e1e2e" }}>
-              <div className="uppercase tracking-widest mb-3" style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#4a4a5c" }}>
-                Previous Wikis
-              </div>
-              {projects.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => loadProject(p.id)}
-                  className="block w-full text-left px-3 py-2.5 rounded-md mb-1"
-                  style={{ color: "#7a7a8c", fontSize: 14, background: "transparent", border: "none", cursor: "pointer" }}
-                  onMouseOver={(e) => (e.currentTarget.style.background = "#12121a")}
-                  onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
-                >
-                  {p.name}
-                  <span className="ml-2" style={{ fontSize: 11, color: "#4a4a5c" }}>
-                    {new Date(p.created_at).toLocaleDateString()}
-                  </span>
-                </button>
-              ))}
+          {/* Preview */}
+          {previewPath && (
+            <div
+              className="mb-5 px-3 py-2 rounded-lg"
+              style={{
+                background: "rgba(196,161,255,0.05)",
+                border: "1px solid rgba(196,161,255,0.1)",
+              }}
+            >
+              <span style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#7a7a8c" }}>
+                Brain will be created at:{" "}
+              </span>
+              <span style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#c4a1ff" }}>
+                {previewPath}
+              </span>
             </div>
           )}
+
+          {/* Auto-compile checkbox */}
+          <label className="flex items-start gap-2.5 mb-6 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoCompile}
+              onChange={(e) => setAutoCompile(e.target.checked)}
+              className="mt-1"
+              style={{ accentColor: "#c4a1ff" }}
+            />
+            <div>
+              <div style={{ fontSize: 13, color: "#e0dfe6" }}>Auto-compile on creation</div>
+              <div style={{ fontSize: 12, color: "#4a4a5c", marginTop: 2 }}>
+                Search papers and generate wiki pages automatically
+              </div>
+            </div>
+          </label>
+
+          {/* Create button */}
+          <button
+            onClick={handleCreate}
+            disabled={!canCreate}
+            className="w-full py-3 rounded-lg font-medium"
+            style={{
+              fontFamily: "IBM Plex Mono",
+              fontSize: 14,
+              color: canCreate ? "#0a0a0f" : "#4a4a5c",
+              background: canCreate ? "#c4a1ff" : "#1e1e2e",
+              border: "none",
+              cursor: canCreate ? "pointer" : "not-allowed",
+            }}
+          >
+            Create Brain &rarr;
+          </button>
         </div>
       </div>
     );
@@ -484,12 +938,15 @@ export default function WikiApp() {
               <div
                 key={i}
                 className="w-2 h-2 rounded-full"
-                style={{ background: "#c4a1ff", animation: `pulse 1.4s ease-in-out ${i * 0.2}s infinite` }}
+                style={{
+                  background: "#c4a1ff",
+                  animation: `pulse 1.4s ease-in-out ${i * 0.2}s infinite`,
+                }}
               />
             ))}
           </div>
           <p style={{ fontFamily: "IBM Plex Mono", fontSize: 13, color: "#7a7a8c" }}>
-            Compiling wiki for &quot;{topic}&quot;...
+            {loadingMessage || "Loading..."}
           </p>
           <style>{`@keyframes pulse { 0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.2); } }`}</style>
         </div>
@@ -497,28 +954,66 @@ export default function WikiApp() {
     );
   }
 
-  // ─── WIKI ───
+  // ─── WIKI VIEWER ───
   const currentPage = pages.find((p) => p.id === activePage) || null;
-  const typeOrder: Record<string, number> = { overview: 0, concept: 1, entity: 2, source: 3, analysis: 4 };
-  const sortedPages = [...pages].sort((a, b) => (typeOrder[a.type] ?? 9) - (typeOrder[b.type] ?? 9));
+  const typeOrder: Record<string, number> = {
+    overview: 0,
+    concept: 1,
+    entity: 2,
+    source: 3,
+    analysis: 4,
+  };
+  const sortedPages = [...pages].sort(
+    (a, b) => (typeOrder[a.type] ?? 9) - (typeOrder[b.type] ?? 9)
+  );
 
   return (
     <div className="min-h-screen flex">
       {/* Sidebar */}
-      <div className="flex flex-col" style={{ width: 280, minWidth: 280, borderRight: "1px solid #1e1e2e", height: "100vh", position: "sticky", top: 0 }}>
+      <div
+        className="flex flex-col"
+        style={{
+          width: 280,
+          minWidth: 280,
+          borderRight: "1px solid #1e1e2e",
+          height: "100vh",
+          position: "sticky",
+          top: 0,
+        }}
+      >
         <div className="p-4 pb-3" style={{ borderBottom: "1px solid #1e1e2e" }}>
           <button
-            onClick={() => { setScreen("home"); setProjectId(null); setPages([]); }}
-            className="mb-1 uppercase tracking-[0.15em]"
-            style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#8b6fc0", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+            onClick={() => {
+              setScreen("brains");
+              setActiveBrain(null);
+              setPages([]);
+              setQueryAnswer(null);
+              setLintResult(null);
+            }}
+            className="mb-1"
+            style={{
+              fontFamily: "IBM Plex Mono",
+              fontSize: 11,
+              color: "#8b6fc0",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+            }}
           >
-            ← Distill
+            &larr; All Brains
           </button>
-          <div className="font-semibold" style={{ fontFamily: "IBM Plex Mono", fontSize: 15, color: "#e0dfe6" }}>
-            {topic}
+          <div
+            className="font-semibold"
+            style={{ fontFamily: "IBM Plex Mono", fontSize: 15, color: "#e0dfe6" }}
+          >
+            {activeBrain?.name}
           </div>
           <div style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#4a4a5c" }}>
-            {pages.length} pages
+            {pages.length} pages &middot;{" "}
+            <span className="truncate" title={activeBrain?.path}>
+              {activeBrain?.path}
+            </span>
           </div>
         </div>
 
@@ -531,18 +1026,63 @@ export default function WikiApp() {
               onKeyDown={(e) => e.key === "Enter" && handleIngest()}
               placeholder="Add a paper..."
               className="flex-1 outline-none px-2.5 py-1.5 rounded"
-              style={{ fontSize: 12, color: "#e0dfe6", background: "#1a1a26", border: "1px solid #1e1e2e" }}
+              style={{
+                fontSize: 12,
+                color: "#e0dfe6",
+                background: "#1a1a26",
+                border: "1px solid #1e1e2e",
+              }}
               disabled={ingesting}
             />
             <button
               onClick={handleIngest}
               disabled={ingesting}
               className="px-2.5 py-1.5 rounded"
-              style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#0a0a0f", background: ingesting ? "#4a4a5c" : "#c4a1ff", border: "none", cursor: "pointer" }}
+              style={{
+                fontFamily: "IBM Plex Mono",
+                fontSize: 11,
+                color: "#0a0a0f",
+                background: ingesting ? "#4a4a5c" : "#c4a1ff",
+                border: "none",
+                cursor: "pointer",
+              }}
             >
               {ingesting ? "..." : "+"}
             </button>
           </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex gap-1.5 p-3" style={{ borderBottom: "1px solid #1e1e2e" }}>
+          <button
+            onClick={handleLint}
+            disabled={linting}
+            className="flex-1 py-1.5 rounded"
+            style={{
+              fontFamily: "IBM Plex Mono",
+              fontSize: 11,
+              color: "#d4a855",
+              background: "rgba(212,168,85,0.1)",
+              border: "1px solid rgba(212,168,85,0.2)",
+              cursor: "pointer",
+            }}
+          >
+            {linting ? "Checking..." : "Health Check"}
+          </button>
+          <button
+            onClick={handleExport}
+            className="flex-1 py-1.5 rounded"
+            style={{
+              fontFamily: "IBM Plex Mono",
+              fontSize: 11,
+              color: "#7ec99a",
+              background: "rgba(126,201,154,0.1)",
+              border: "1px solid rgba(126,201,154,0.2)",
+              cursor: "pointer",
+            }}
+          >
+            Export
+          </button>
         </div>
 
         {/* Tabs */}
@@ -553,10 +1093,13 @@ export default function WikiApp() {
               onClick={() => setSidebarTab(tab)}
               className="flex-1 py-2.5 uppercase tracking-wider"
               style={{
-                fontFamily: "IBM Plex Mono", fontSize: 11,
+                fontFamily: "IBM Plex Mono",
+                fontSize: 11,
                 color: sidebarTab === tab ? "#c4a1ff" : "#4a4a5c",
-                background: "none", border: "none",
-                borderBottom: sidebarTab === tab ? "2px solid #c4a1ff" : "2px solid transparent",
+                background: "none",
+                border: "none",
+                borderBottom:
+                  sidebarTab === tab ? "2px solid #c4a1ff" : "2px solid transparent",
                 cursor: "pointer",
               }}
             >
@@ -568,44 +1111,83 @@ export default function WikiApp() {
         <div className="flex-1 overflow-y-auto p-2">
           {sidebarTab === "pages" &&
             sortedPages.map((p) => {
-              const typeColor: Record<string, string> = { overview: "#c4a1ff", concept: "#90c4ff", entity: "#7ec99a", source: "#d4a855" };
+              const typeColor: Record<string, string> = {
+                overview: "#c4a1ff",
+                concept: "#90c4ff",
+                entity: "#7ec99a",
+                source: "#d4a855",
+                analysis: "#d46a6a",
+              };
               return (
                 <div
                   key={p.id}
                   onClick={() => setActivePage(p.id)}
                   className="px-3 py-2.5 rounded-md cursor-pointer mb-0.5"
                   style={{
-                    background: activePage === p.id ? "rgba(196,161,255,0.08)" : "transparent",
+                    background:
+                      activePage === p.id ? "rgba(196,161,255,0.08)" : "transparent",
                     borderLeft: `2px solid ${activePage === p.id ? "#c4a1ff" : "transparent"}`,
                   }}
                 >
-                  <div style={{ fontSize: 13, color: activePage === p.id ? "#e0dfe6" : "#7a7a8c", fontWeight: activePage === p.id ? 500 : 400 }}>
-                    {p.title.length > 30 ? p.title.slice(0, 28) + "…" : p.title}
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: activePage === p.id ? "#e0dfe6" : "#7a7a8c",
+                      fontWeight: activePage === p.id ? 500 : 400,
+                    }}
+                  >
+                    {p.title.length > 30 ? p.title.slice(0, 28) + "..." : p.title}
                   </div>
-                  <span className="uppercase tracking-wider" style={{ fontFamily: "IBM Plex Mono", fontSize: 9, color: typeColor[p.type] || "#4a4a5c" }}>
+                  <span
+                    className="uppercase tracking-wider"
+                    style={{
+                      fontFamily: "IBM Plex Mono",
+                      fontSize: 9,
+                      color: typeColor[p.type] || "#4a4a5c",
+                    }}
+                  >
                     {p.type}
                   </span>
                 </div>
               );
             })}
 
-          {sidebarTab === "graph" && <WikiGraph pages={pages} activePage={activePage} onNavigate={setActivePage} />}
+          {sidebarTab === "graph" && (
+            <WikiGraph pages={pages} activePage={activePage} onNavigate={setActivePage} />
+          )}
 
           {sidebarTab === "log" &&
-            log.map((entry, i) => {
-              const ac: Record<string, string> = { ingest: "#7ec99a", compile: "#90c4ff", lint: "#d4a855", search: "#c4a1ff", complete: "#c4a1ff" };
+            [...log].reverse().map((entry, i) => {
+              const ac: Record<string, string> = {
+                init: "#7a7a8c",
+                search: "#c4a1ff",
+                compile: "#90c4ff",
+                create: "#7ec99a",
+                update: "#d4a855",
+                ingest: "#7ec99a",
+                lint: "#d4a855",
+                query: "#c4a1ff",
+                save: "#90c4ff",
+              };
               return (
                 <div key={i} className="py-2" style={{ borderBottom: "1px solid #1e1e2e" }}>
                   <div className="flex items-center gap-1.5">
-                    <span className="uppercase" style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: ac[entry.action] || "#4a4a5c" }}>
+                    <span
+                      className="uppercase"
+                      style={{
+                        fontFamily: "IBM Plex Mono",
+                        fontSize: 10,
+                        color: ac[entry.action] || "#4a4a5c",
+                      }}
+                    >
                       {entry.action}
                     </span>
                     <span style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#4a4a5c" }}>
-                      {new Date(entry.created_at).toLocaleTimeString()}
+                      {new Date(entry.date).toLocaleTimeString()}
                     </span>
                   </div>
                   <div className="mt-0.5" style={{ fontSize: 12, color: "#7a7a8c" }}>
-                    {entry.detail.length > 50 ? entry.detail.slice(0, 48) + "…" : entry.detail}
+                    {entry.detail.length > 50 ? entry.detail.slice(0, 48) + "..." : entry.detail}
                   </div>
                 </div>
               );
@@ -614,14 +1196,194 @@ export default function WikiApp() {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 px-12 py-8 overflow-y-auto" style={{ maxWidth: 720 }}>
-        {currentPage ? (
-          <PageView page={currentPage} onNavigate={handleNavigate} />
-        ) : (
-          <div className="text-center py-20" style={{ fontFamily: "IBM Plex Mono", fontSize: 13, color: "#4a4a5c" }}>
-            Select a page from the sidebar
+      <div className="flex-1 overflow-y-auto" style={{ maxWidth: 780 }}>
+        {/* Query bar */}
+        <div className="px-12 pt-6">
+          <div className="flex gap-2">
+            <input
+              value={queryText}
+              onChange={(e) => setQueryText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleQuery()}
+              placeholder="Ask a question about this brain..."
+              className="flex-1 outline-none"
+              style={{
+                padding: "10px 14px",
+                fontSize: 13,
+                color: "#e0dfe6",
+                background: "#12121a",
+                border: "1px solid #1e1e2e",
+                borderRadius: 8,
+              }}
+              disabled={querying}
+            />
+            <button
+              onClick={handleQuery}
+              disabled={querying}
+              className="px-4 rounded-lg"
+              style={{
+                fontFamily: "IBM Plex Mono",
+                fontSize: 12,
+                color: "#0a0a0f",
+                background: querying ? "#4a4a5c" : "#c4a1ff",
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              {querying ? "..." : "Ask"}
+            </button>
+          </div>
+        </div>
+
+        {/* Query answer panel */}
+        {queryAnswer && (
+          <div
+            className="mx-12 mt-4 p-4 rounded-lg"
+            style={{
+              background: "rgba(196,161,255,0.05)",
+              border: "1px solid rgba(196,161,255,0.15)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span
+                className="uppercase tracking-widest"
+                style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#c4a1ff" }}
+              >
+                Answer
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveQueryAsPage}
+                  className="px-2 py-0.5 rounded"
+                  style={{
+                    fontFamily: "IBM Plex Mono",
+                    fontSize: 10,
+                    color: "#7ec99a",
+                    background: "rgba(126,201,154,0.1)",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  Save as page
+                </button>
+                <button
+                  onClick={() => setQueryAnswer(null)}
+                  style={{
+                    fontFamily: "IBM Plex Mono",
+                    fontSize: 12,
+                    color: "#4a4a5c",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  x
+                </button>
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: "#b0afba", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+              {queryAnswer}
+            </div>
           </div>
         )}
+
+        {/* Lint results panel */}
+        {lintResult && (
+          <div
+            className="mx-12 mt-4 p-4 rounded-lg"
+            style={{
+              background: "rgba(212,168,85,0.05)",
+              border: "1px solid rgba(212,168,85,0.15)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <span
+                className="uppercase tracking-widest"
+                style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#d4a855" }}
+              >
+                Health Check &middot; {lintResult.issues.length} issues
+              </span>
+              <button
+                onClick={() => setLintResult(null)}
+                style={{
+                  fontFamily: "IBM Plex Mono",
+                  fontSize: 12,
+                  color: "#4a4a5c",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                x
+              </button>
+            </div>
+            {lintResult.issues.map((issue, i) => (
+              <div key={i} className="mb-2 flex gap-2" style={{ fontSize: 12 }}>
+                <span
+                  className="uppercase shrink-0"
+                  style={{
+                    fontFamily: "IBM Plex Mono",
+                    fontSize: 10,
+                    color: "#d4a855",
+                    marginTop: 2,
+                  }}
+                >
+                  {issue.type}
+                </span>
+                <span style={{ color: "#7a7a8c" }}>{issue.description}</span>
+              </div>
+            ))}
+            {lintResult.suggestions.length > 0 && (
+              <div className="mt-3 pt-3" style={{ borderTop: "1px solid rgba(212,168,85,0.15)" }}>
+                <div
+                  className="mb-2 uppercase tracking-widest"
+                  style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#7a7a8c" }}
+                >
+                  Suggestions
+                </div>
+                {lintResult.suggestions.map((s, i) => (
+                  <div key={i} className="mb-1" style={{ fontSize: 12, color: "#7a7a8c" }}>
+                    &bull; {s}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Error banner */}
+        {error && (
+          <div
+            className="mx-12 mt-4 px-4 py-3 rounded-lg text-sm"
+            style={{
+              background: "rgba(212,106,106,0.1)",
+              color: "#d46a6a",
+              border: "1px solid rgba(212,106,106,0.2)",
+            }}
+          >
+            {error}
+            <button
+              onClick={() => setError(null)}
+              className="float-right"
+              style={{ background: "none", border: "none", color: "#d46a6a", cursor: "pointer" }}
+            >
+              x
+            </button>
+          </div>
+        )}
+
+        {/* Page content */}
+        <div className="px-12 py-6">
+          {currentPage ? (
+            <PageView page={currentPage} onNavigate={handleNavigate} />
+          ) : (
+            <div
+              className="text-center py-20"
+              style={{ fontFamily: "IBM Plex Mono", fontSize: 13, color: "#4a4a5c" }}
+            >
+              Select a page from the sidebar
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

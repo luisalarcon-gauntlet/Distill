@@ -240,7 +240,7 @@ All routes should use the config manager to look up brain paths, and the wiki-fs
 
 ---
 
-## Prompt 8: Frontend — Brain Selector
+## Prompt 8: Frontend — Brain Selector ✅
 
 ```
 Create the main frontend as a client component at components/WikiApp.tsx, imported by app/page.tsx.
@@ -263,7 +263,7 @@ Don't use any component libraries. Plain React + Tailwind + inline styles.
 
 ---
 
-## Prompt 9: Frontend — Create Brain Flow
+## Prompt 9: Frontend — Create Brain Flow ✅
 
 ```
 Add the CREATE BRAIN screen to WikiApp.tsx.
@@ -293,7 +293,7 @@ When Create is clicked:
 
 ---
 
-## Prompt 10: Frontend — Wiki Viewer
+## Prompt 10: Frontend — Wiki Viewer ✅
 
 ```
 Add the WIKI VIEWER screen to WikiApp.tsx. This is shown when a brain is open.
