@@ -98,7 +98,7 @@ Ensure ~/.distill/ directory is created if it doesn't exist.
 
 ---
 
-## Prompt 5: Wiki Filesystem Layer
+## Prompt 5: Wiki Filesystem Layer ✅
 
 ```
 Create lib/wiki-fs.ts — handles reading and writing the wiki as real .md files on disk.
