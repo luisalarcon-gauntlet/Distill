@@ -146,7 +146,7 @@ Map page types to subdirectories: overview→wiki/, concept→wiki/concepts/, en
 
 ---
 
-## Prompt 6: Wiki Compiler (LLM Prompts)
+## Prompt 6: Wiki Compiler (LLM Prompts) ✅
 
 ```
 Create lib/compiler.ts — the core logic that turns papers into interlinked wiki pages via LLM.

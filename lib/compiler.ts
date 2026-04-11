@@ -6,18 +6,19 @@
 
 import { llmJSON } from "./llm";
 import type { Paper } from "./papers";
+import type { WikiPage } from "./wiki-fs";
 
-export interface WikiPage {
+interface CompilerPage {
   id: string;
   title: string;
   type: "overview" | "concept" | "entity" | "source" | "analysis";
   content: string;
   links: string[];
-  source_count: number;
+  sources: string[];
 }
 
 interface WikiCompilation {
-  pages: Record<string, WikiPage>;
+  pages: Record<string, CompilerPage>;
 }
 
 const SYSTEM_PROMPT = `You are a knowledge wiki compiler. Your job is to take academic papers and compile them into a structured, interlinked wiki.
@@ -36,13 +37,17 @@ Page types:
 - concept: A key idea, technique, or method. Explains what it is and how it relates to other concepts.
 - entity: A specific model, dataset, system, or organization. Factual and detailed.
 - source: A summary of a specific paper. Includes key contributions, methods, findings, and significance.
+- analysis: A cross-cutting comparison or deeper investigation.
 
 Return ONLY valid JSON, no markdown fences.`;
 
 /**
  * Generate a full wiki from a topic and set of papers.
  */
-export async function compileWiki(topic: string, papers: Paper[]): Promise<WikiCompilation> {
+export async function compileWiki(
+  topic: string,
+  papers: Paper[]
+): Promise<{ pages: Record<string, CompilerPage> }> {
   const paperContext = papers
     .map(
       (p, i) =>
@@ -63,7 +68,7 @@ Generate a JSON object with this exact structure:
       "type": "overview|concept|entity|source",
       "content": "Markdown content with [[Wiki Links]]",
       "links": ["linked-page-id", ...],
-      "source_count": <number>
+      "sources": ["paper-title-or-id", ...]
     }
   }
 }
@@ -85,9 +90,12 @@ Requirements:
 export async function ingestSource(
   existingPages: WikiPage[],
   newPaper: Paper
-): Promise<{ updated: WikiPage[]; created: WikiPage[] }> {
+): Promise<{ updated: CompilerPage[]; created: CompilerPage[] }> {
   const existingContext = existingPages
-    .map((p) => `- [${p.id}] "${p.title}" (${p.type}): ${p.content.slice(0, 200)}...`)
+    .map(
+      (p) =>
+        `- [${p.id}] "${p.title}" (${p.type}): ${p.content.slice(0, 200)}...`
+    )
     .join("\n");
 
   const prompt = `An existing wiki has these pages:
@@ -101,10 +109,10 @@ Abstract: ${newPaper.abstract}
 Generate a JSON object:
 {
   "updated": [
-    { "id": "existing-page-id", "title": "...", "type": "...", "content": "FULL updated content", "links": [...], "source_count": <n> }
+    { "id": "existing-page-id", "title": "...", "type": "...", "content": "FULL updated content", "links": [...], "sources": [...] }
   ],
   "created": [
-    { "id": "new-page-id", "title": "...", "type": "...", "content": "...", "links": [...], "source_count": 1 }
+    { "id": "new-page-id", "title": "...", "type": "...", "content": "...", "links": [...], "sources": ["${newPaper.title}"] }
   ]
 }
 
@@ -122,12 +130,17 @@ Rules:
 /**
  * Lint the wiki — find issues and suggest improvements.
  */
-export async function lintWiki(pages: WikiPage[]): Promise<{
+export async function lintWiki(
+  pages: WikiPage[]
+): Promise<{
   issues: { type: string; description: string; page?: string }[];
   suggestions: string[];
 }> {
   const context = pages
-    .map((p) => `[${p.id}] "${p.title}" (${p.type}, ${p.links.length} links, ${p.source_count} sources)\nContent preview: ${p.content.slice(0, 300)}...`)
+    .map(
+      (p) =>
+        `[${p.id}] "${p.title}" (${p.type}, ${p.links.length} links, ${p.sources.length} sources)\nContent preview: ${p.content.slice(0, 300)}...`
+    )
     .join("\n\n");
 
   const prompt = `Analyze this wiki for issues:
