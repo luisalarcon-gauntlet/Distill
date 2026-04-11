@@ -72,7 +72,7 @@ Handle errors gracefully — return empty arrays, not crashes.
 
 ---
 
-## Prompt 4: Config Manager (Brain Registry)
+## Prompt 4: Config Manager (Brain Registry) ✅
 
 ```
 Create lib/config.ts — manages the registry of brains.
