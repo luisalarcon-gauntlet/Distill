@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.git/
+data/
+*.db
+.env
+.env.local
+.env*.local
+.dockerignore
+Dockerfile
+README.md
+CONTRIBUTING.md
+LICENSE
