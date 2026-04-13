@@ -30,7 +30,52 @@ interface LogEntry {
   detail: string;
 }
 
-type Screen = "brains" | "create" | "loading" | "wiki";
+interface Paper {
+  id: string;
+  title: string;
+  authors: string[];
+  year: number | null;
+  abstract: string;
+  url: string;
+  citationCount: number;
+  source_api: "semantic_scholar" | "arxiv" | "openalex";
+  arxivId?: string;
+}
+
+type Screen = "brains" | "create" | "review" | "loading" | "wiki";
+
+// ─── Source badges ───
+const SOURCE_LABELS: Record<Paper["source_api"], string> = {
+  semantic_scholar: "S2",
+  arxiv: "arXiv",
+  openalex: "OpenAlex",
+};
+
+const SOURCE_COLORS: Record<Paper["source_api"], { fg: string; bg: string }> = {
+  semantic_scholar: { fg: "#90c4ff", bg: "rgba(144,196,255,0.12)" },
+  arxiv: { fg: "#d4a855", bg: "rgba(212,168,85,0.12)" },
+  openalex: { fg: "#7ec99a", bg: "rgba(126,201,154,0.12)" },
+};
+
+function SourceBadge({ source }: { source: Paper["source_api"] }) {
+  const c = SOURCE_COLORS[source];
+  return (
+    <span
+      className="uppercase tracking-wider"
+      style={{
+        fontFamily: "IBM Plex Mono",
+        fontSize: 9,
+        padding: "2px 6px",
+        borderRadius: 4,
+        color: c.fg,
+        background: c.bg,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {SOURCE_LABELS[source]}
+    </span>
+  );
+}
 
 // ─── Graph Component ───
 function WikiGraph({
@@ -355,7 +400,6 @@ export default function WikiApp() {
   const [createName, setCreateName] = useState("");
   const [createTopic, setCreateTopic] = useState("");
   const [createDir, setCreateDir] = useState("");
-  const [autoCompile, setAutoCompile] = useState(true);
   const [browseDirs, setBrowseDirs] = useState<{ name: string; path: string }[]>([]);
   const [browseParent, setBrowseParent] = useState<string | null>(null);
   const [browseCurrent, setBrowseCurrent] = useState("");
@@ -363,9 +407,20 @@ export default function WikiApp() {
   const [newFolderName, setNewFolderName] = useState("");
   const [newFolderError, setNewFolderError] = useState("");
 
+  // Review state (step 2 of brain creation)
+  const [pendingBrain, setPendingBrain] = useState<BrainConfig | null>(null);
+  const [candidatePapers, setCandidatePapers] = useState<Paper[]>([]);
+  const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(new Set());
+  const [expandedAbstracts, setExpandedAbstracts] = useState<Set<string>>(new Set());
+  const [reviewSearchQuery, setReviewSearchQuery] = useState("");
+  const [reviewSearching, setReviewSearching] = useState(false);
+
   // Wiki interaction state
   const [ingestQuery, setIngestQuery] = useState("");
   const [ingesting, setIngesting] = useState(false);
+  const [ingestResults, setIngestResults] = useState<Paper[]>([]);
+  const [ingestSelected, setIngestSelected] = useState<Set<string>>(new Set());
+  const [ingestSearching, setIngestSearching] = useState(false);
   const [queryText, setQueryText] = useState("");
   const [querying, setQuerying] = useState(false);
   const [queryAnswer, setQueryAnswer] = useState<string | null>(null);
@@ -447,11 +502,7 @@ export default function WikiApp() {
   const handleCreate = useCallback(async () => {
     if (!createName.trim() || !createTopic.trim() || !createDir) return;
     setScreen("loading");
-    setLoadingMessage(
-      autoCompile
-        ? `Creating brain and compiling wiki for "${createTopic}"...`
-        : `Creating brain "${createName}"...`
-    );
+    setLoadingMessage(`Searching Semantic Scholar, arXiv, OpenAlex for "${createTopic}"...`);
     setError(null);
     try {
       const res = await fetch("/api/brains", {
@@ -461,21 +512,101 @@ export default function WikiApp() {
           name: createName,
           topic: createTopic,
           directory: createDir,
-          autoCompile,
         }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       await loadBrains();
-      await loadBrain(data.brain.id);
-      if (autoCompile && data.sourceCount === 0) {
-        setError(`No papers found for "${createTopic}" — the brain was created but has no content. Try ingesting papers manually or using a different topic.`);
-      }
+      const papers: Paper[] = data.papers || [];
+      setPendingBrain(data.brain);
+      setCandidatePapers(papers);
+      setSelectedPaperIds(new Set(papers.map((p) => p.id)));
+      setExpandedAbstracts(new Set());
+      setReviewSearchQuery("");
+      setScreen("review");
     } catch (e: any) {
       setError(e.message);
       setScreen("create");
     }
-  }, [createName, createTopic, createDir, autoCompile, loadBrain]);
+  }, [createName, createTopic, createDir, loadBrain]);
+
+  const toggleSelectedPaper = useCallback((paperId: string) => {
+    setSelectedPaperIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(paperId)) next.delete(paperId);
+      else next.add(paperId);
+      return next;
+    });
+  }, []);
+
+  const toggleAbstract = useCallback((paperId: string) => {
+    setExpandedAbstracts((prev) => {
+      const next = new Set(prev);
+      if (next.has(paperId)) next.delete(paperId);
+      else next.add(paperId);
+      return next;
+    });
+  }, []);
+
+  const handleReviewSearch = useCallback(async () => {
+    if (!reviewSearchQuery.trim() || !pendingBrain) return;
+    setReviewSearching(true);
+    try {
+      const res = await fetch(`/api/brains/${pendingBrain.id}/ingest/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: reviewSearchQuery }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const newPapers: Paper[] = data.papers || [];
+      // Append, skipping any IDs we already have.
+      setCandidatePapers((prev) => {
+        const existingIds = new Set(prev.map((p) => p.id));
+        const additions = newPapers.filter((p) => !existingIds.has(p.id));
+        // Auto-select newly added papers.
+        setSelectedPaperIds((sel) => {
+          const next = new Set(sel);
+          for (const p of additions) next.add(p.id);
+          return next;
+        });
+        return [...prev, ...additions];
+      });
+      setReviewSearchQuery("");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setReviewSearching(false);
+    }
+  }, [reviewSearchQuery, pendingBrain]);
+
+  const handleCompile = useCallback(async () => {
+    if (!pendingBrain) return;
+    const chosen = candidatePapers.filter((p) => selectedPaperIds.has(p.id));
+    setScreen("loading");
+    setLoadingMessage(
+      chosen.length === 0
+        ? `Creating empty brain "${pendingBrain.name}"...`
+        : `Compiling wiki from ${chosen.length} paper${chosen.length === 1 ? "" : "s"}...`
+    );
+    setError(null);
+    try {
+      const res = await fetch(`/api/brains/${pendingBrain.id}/compile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ papers: chosen }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      await loadBrain(pendingBrain.id);
+      setPendingBrain(null);
+      setCandidatePapers([]);
+      setSelectedPaperIds(new Set());
+    } catch (e: any) {
+      setError(e.message);
+      setScreen("review");
+    }
+  }, [pendingBrain, candidatePapers, selectedPaperIds, loadBrain]);
 
   const handleRemoveBrain = useCallback(
     async (e: React.MouseEvent, id: string) => {
@@ -490,25 +621,62 @@ export default function WikiApp() {
     []
   );
 
-  const handleIngest = useCallback(async () => {
+  const handleIngestSearch = useCallback(async () => {
     if (!ingestQuery.trim() || !activeBrain) return;
-    setIngesting(true);
+    setIngestSearching(true);
+    setIngestResults([]);
+    setIngestSelected(new Set());
     try {
-      const res = await fetch(`/api/brains/${activeBrain.id}/ingest`, {
+      const res = await fetch(`/api/brains/${activeBrain.id}/ingest/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: ingestQuery }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+      const papers: Paper[] = data.papers || [];
+      setIngestResults(papers);
+      // Default: select all results so single-click "Add selected" is fast.
+      setIngestSelected(new Set(papers.map((p) => p.id)));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setIngestSearching(false);
+    }
+  }, [ingestQuery, activeBrain]);
+
+  const toggleIngestSelected = useCallback((paperId: string) => {
+    setIngestSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(paperId)) next.delete(paperId);
+      else next.add(paperId);
+      return next;
+    });
+  }, []);
+
+  const handleIngestAdd = useCallback(async () => {
+    if (!activeBrain) return;
+    const chosen = ingestResults.filter((p) => ingestSelected.has(p.id));
+    if (chosen.length === 0) return;
+    setIngesting(true);
+    try {
+      const res = await fetch(`/api/brains/${activeBrain.id}/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ papers: chosen }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
       await loadBrain(activeBrain.id);
       setIngestQuery("");
+      setIngestResults([]);
+      setIngestSelected(new Set());
     } catch (e: any) {
       setError(e.message);
     } finally {
       setIngesting(false);
     }
-  }, [ingestQuery, activeBrain, loadBrain]);
+  }, [activeBrain, ingestResults, ingestSelected, loadBrain]);
 
   const handleQuery = useCallback(async () => {
     if (!queryText.trim() || !activeBrain) return;
@@ -1023,22 +1191,20 @@ export default function WikiApp() {
             </div>
           )}
 
-          {/* Auto-compile checkbox */}
-          <label className="flex items-start gap-2.5 mb-6 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoCompile}
-              onChange={(e) => setAutoCompile(e.target.checked)}
-              className="mt-1"
-              style={{ accentColor: "#c4a1ff" }}
-            />
-            <div>
-              <div style={{ fontSize: 13, color: "#e0dfe6" }}>Auto-compile on creation</div>
-              <div style={{ fontSize: 12, color: "#4a4a5c", marginTop: 2 }}>
-                Search papers and generate wiki pages automatically
-              </div>
-            </div>
-          </label>
+          {/* Flow note */}
+          <div
+            className="mb-6 px-3 py-2 rounded-lg"
+            style={{
+              background: "rgba(196,161,255,0.04)",
+              border: "1px solid rgba(196,161,255,0.08)",
+              fontSize: 12,
+              color: "#7a7a8c",
+              lineHeight: 1.6,
+            }}
+          >
+            Next: we&rsquo;ll search Semantic Scholar, arXiv, and OpenAlex for papers
+            about your topic so you can review and curate them before compiling.
+          </div>
 
           {/* Create button */}
           <button
@@ -1054,8 +1220,234 @@ export default function WikiApp() {
               cursor: canCreate ? "pointer" : "not-allowed",
             }}
           >
-            Create Brain &rarr;
+            Search for Papers &rarr;
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── REVIEW PAPERS ───
+  if (screen === "review") {
+    const selectedCount = candidatePapers.filter((p) => selectedPaperIds.has(p.id)).length;
+    const hasNoInitialPapers = candidatePapers.length === 0;
+
+    return (
+      <div className="min-h-screen flex flex-col" style={{ paddingBottom: 80 }}>
+        <div className="max-w-3xl w-full mx-auto px-6 pt-10">
+          <button
+            onClick={() => {
+              setScreen("create");
+              setError(null);
+            }}
+            className="mb-4"
+            style={{
+              fontFamily: "IBM Plex Mono",
+              fontSize: 13,
+              color: "#8b6fc0",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            &larr; Back
+          </button>
+
+          <div
+            className="uppercase tracking-[0.15em] mb-2"
+            style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#8b6fc0" }}
+          >
+            {pendingBrain?.name}
+          </div>
+          <h1
+            className="font-semibold mb-1"
+            style={{ fontFamily: "IBM Plex Mono", fontSize: 26, color: "#e0dfe6" }}
+          >
+            Review Papers
+          </h1>
+          <p className="mb-8" style={{ fontSize: 13, color: "#7a7a8c" }}>
+            {hasNoInitialPapers
+              ? `No papers found for "${pendingBrain?.topic}". Try different keywords below, or compile an empty brain you can fill manually.`
+              : `${candidatePapers.length} paper${candidatePapers.length === 1 ? "" : "s"} found for "${pendingBrain?.topic}". Uncheck any you don't want included.`}
+          </p>
+
+          {error && (
+            <div
+              className="mb-4 px-4 py-3 rounded-lg text-sm"
+              style={{
+                background: "rgba(212,106,106,0.1)",
+                color: "#d46a6a",
+                border: "1px solid rgba(212,106,106,0.2)",
+              }}
+            >
+              {error}
+              <button
+                onClick={() => setError(null)}
+                className="float-right"
+                style={{ background: "none", border: "none", color: "#d46a6a", cursor: "pointer" }}
+              >
+                x
+              </button>
+            </div>
+          )}
+
+          {/* Search for more */}
+          <div className="flex gap-2 mb-6">
+            <input
+              value={reviewSearchQuery}
+              onChange={(e) => setReviewSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleReviewSearch()}
+              placeholder="Search for more papers..."
+              className="flex-1 outline-none"
+              style={{
+                padding: "10px 14px",
+                fontSize: 13,
+                color: "#e0dfe6",
+                background: "#12121a",
+                border: "1px solid #1e1e2e",
+                borderRadius: 8,
+              }}
+              disabled={reviewSearching}
+            />
+            <button
+              onClick={handleReviewSearch}
+              disabled={reviewSearching || !reviewSearchQuery.trim()}
+              className="px-4 rounded-lg"
+              style={{
+                fontFamily: "IBM Plex Mono",
+                fontSize: 12,
+                color: "#c4a1ff",
+                background: "rgba(196,161,255,0.1)",
+                border: "1px solid rgba(196,161,255,0.2)",
+                cursor: reviewSearching ? "wait" : "pointer",
+              }}
+            >
+              {reviewSearching ? "Searching..." : "Search"}
+            </button>
+          </div>
+
+          {/* Paper list */}
+          <div className="flex flex-col gap-2.5">
+            {candidatePapers.map((paper) => {
+              const isSelected = selectedPaperIds.has(paper.id);
+              const isExpanded = expandedAbstracts.has(paper.id);
+              const authorPreview =
+                paper.authors.slice(0, 3).join(", ") +
+                (paper.authors.length > 3 ? ", et al." : "");
+              const absPreview =
+                paper.abstract.length > 150 && !isExpanded
+                  ? paper.abstract.slice(0, 150) + "..."
+                  : paper.abstract;
+
+              return (
+                <div
+                  key={paper.id}
+                  className="p-4 rounded-lg"
+                  style={{
+                    background: isSelected ? "#12121a" : "#0d0d14",
+                    border: `1px solid ${isSelected ? "#2a2a3c" : "#1a1a26"}`,
+                    opacity: isSelected ? 1 : 0.55,
+                    transition: "opacity 0.15s, background 0.15s",
+                  }}
+                >
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelectedPaper(paper.id)}
+                      className="mt-1"
+                      style={{ accentColor: "#c4a1ff", flexShrink: 0 }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <div
+                          className="font-semibold"
+                          style={{ fontSize: 14, color: "#e0dfe6", lineHeight: 1.4 }}
+                        >
+                          {paper.title}
+                        </div>
+                        <SourceBadge source={paper.source_api} />
+                      </div>
+                      <div style={{ fontSize: 12, color: "#7a7a8c", marginBottom: 4 }}>
+                        {authorPreview || "Unknown authors"}
+                      </div>
+                      <div
+                        className="flex items-center gap-3 mb-2"
+                        style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#4a4a5c" }}
+                      >
+                        <span>{paper.year ?? "n.d."}</span>
+                        <span>&middot;</span>
+                        <span>
+                          {paper.citationCount.toLocaleString()} citation
+                          {paper.citationCount === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      {paper.abstract && (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "#8a8a9c",
+                            lineHeight: 1.6,
+                          }}
+                        >
+                          {absPreview}
+                          {paper.abstract.length > 150 && (
+                            <button
+                              onClick={() => toggleAbstract(paper.id)}
+                              className="ml-1"
+                              style={{
+                                fontFamily: "IBM Plex Mono",
+                                fontSize: 11,
+                                color: "#8b6fc0",
+                                background: "none",
+                                border: "none",
+                                cursor: "pointer",
+                                padding: 0,
+                              }}
+                            >
+                              {isExpanded ? "show less" : "show more"}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Sticky footer */}
+        <div
+          className="fixed bottom-0 left-0 right-0"
+          style={{
+            background: "rgba(10,10,15,0.95)",
+            borderTop: "1px solid #1e1e2e",
+            backdropFilter: "blur(8px)",
+            padding: "14px 24px",
+          }}
+        >
+          <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
+            <div style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: "#7a7a8c" }}>
+              {selectedCount} paper{selectedCount === 1 ? "" : "s"} selected
+            </div>
+            <button
+              onClick={handleCompile}
+              className="px-5 py-2.5 rounded-lg font-medium"
+              style={{
+                fontFamily: "IBM Plex Mono",
+                fontSize: 13,
+                color: "#0a0a0f",
+                background: "#c4a1ff",
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              {selectedCount === 0 ? "Compile Empty Brain →" : "Compile Brain →"}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -1156,8 +1548,8 @@ export default function WikiApp() {
             <input
               value={ingestQuery}
               onChange={(e) => setIngestQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleIngest()}
-              placeholder="Add a paper..."
+              onKeyDown={(e) => e.key === "Enter" && handleIngestSearch()}
+              placeholder="Search for papers..."
               className="flex-1 outline-none px-2.5 py-1.5 rounded"
               style={{
                 fontSize: 12,
@@ -1165,24 +1557,133 @@ export default function WikiApp() {
                 background: "#1a1a26",
                 border: "1px solid #1e1e2e",
               }}
-              disabled={ingesting}
+              disabled={ingestSearching || ingesting}
             />
             <button
-              onClick={handleIngest}
-              disabled={ingesting}
+              onClick={handleIngestSearch}
+              disabled={ingestSearching || ingesting || !ingestQuery.trim()}
               className="px-2.5 py-1.5 rounded"
               style={{
                 fontFamily: "IBM Plex Mono",
                 fontSize: 11,
                 color: "#0a0a0f",
-                background: ingesting ? "#4a4a5c" : "#c4a1ff",
+                background:
+                  ingestSearching || ingesting || !ingestQuery.trim()
+                    ? "#4a4a5c"
+                    : "#c4a1ff",
                 border: "none",
                 cursor: "pointer",
               }}
             >
-              {ingesting ? "..." : "+"}
+              {ingestSearching ? "..." : "go"}
             </button>
           </div>
+
+          {/* Results dropdown */}
+          {ingestResults.length > 0 && (
+            <div
+              className="mt-2 rounded"
+              style={{
+                background: "#0d0d14",
+                border: "1px solid #1e1e2e",
+                maxHeight: 320,
+                overflowY: "auto",
+              }}
+            >
+              {ingestResults.map((paper) => {
+                const isSelected = ingestSelected.has(paper.id);
+                return (
+                  <div
+                    key={paper.id}
+                    onClick={() => toggleIngestSelected(paper.id)}
+                    className="px-2.5 py-2 cursor-pointer"
+                    style={{
+                      borderBottom: "1px solid #14141c",
+                      background: isSelected ? "rgba(196,161,255,0.06)" : "transparent",
+                    }}
+                  >
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleIngestSelected(paper.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-0.5"
+                        style={{ accentColor: "#c4a1ff", flexShrink: 0 }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "#e0dfe6",
+                            lineHeight: 1.35,
+                            marginBottom: 2,
+                          }}
+                        >
+                          {paper.title.length > 80
+                            ? paper.title.slice(0, 78) + "..."
+                            : paper.title}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            style={{
+                              fontFamily: "IBM Plex Mono",
+                              fontSize: 10,
+                              color: "#4a4a5c",
+                            }}
+                          >
+                            {paper.year ?? "n.d."}
+                          </span>
+                          <SourceBadge source={paper.source_api} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="flex items-center justify-between px-2.5 py-2" style={{ background: "#0a0a12" }}>
+                <span style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#7a7a8c" }}>
+                  {ingestSelected.size} selected
+                </span>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => {
+                      setIngestResults([]);
+                      setIngestSelected(new Set());
+                    }}
+                    disabled={ingesting}
+                    className="px-2 py-1 rounded"
+                    style={{
+                      fontFamily: "IBM Plex Mono",
+                      fontSize: 10,
+                      color: "#7a7a8c",
+                      background: "transparent",
+                      border: "1px solid #1e1e2e",
+                      cursor: "pointer",
+                    }}
+                  >
+                    clear
+                  </button>
+                  <button
+                    onClick={handleIngestAdd}
+                    disabled={ingesting || ingestSelected.size === 0}
+                    className="px-2 py-1 rounded"
+                    style={{
+                      fontFamily: "IBM Plex Mono",
+                      fontSize: 10,
+                      color: "#0a0a0f",
+                      background:
+                        ingesting || ingestSelected.size === 0 ? "#4a4a5c" : "#c4a1ff",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {ingesting ? "adding..." : "add selected"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Action buttons */}
