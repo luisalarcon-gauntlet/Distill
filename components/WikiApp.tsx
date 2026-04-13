@@ -468,6 +468,9 @@ export default function WikiApp() {
       if (data.error) throw new Error(data.error);
       await loadBrains();
       await loadBrain(data.brain.id);
+      if (autoCompile && data.sourceCount === 0) {
+        setError(`No papers found for "${createTopic}" — the brain was created but has no content. Try ingesting papers manually or using a different topic.`);
+      }
     } catch (e: any) {
       setError(e.message);
       setScreen("create");
