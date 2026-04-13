@@ -3,11 +3,9 @@ import {
   listBrains,
   registerBrain,
   generateBrainId,
-  setLastActive,
 } from "@/lib/config";
-import { initWikiDir, writePage, rebuildIndex, appendLog } from "@/lib/wiki-fs";
-import { searchPapers } from "@/lib/papers";
-import { compileWiki } from "@/lib/compiler";
+import { initWikiDir, appendLog } from "@/lib/wiki-fs";
+import { searchAllSources } from "@/lib/papers";
 import path from "path";
 
 export async function GET() {
@@ -23,10 +21,16 @@ export async function GET() {
   }
 }
 
+/**
+ * Create a brain folder, search for papers across all sources, and
+ * return them for user review. Compilation is now a separate step
+ * (POST /api/brains/[id]/compile) so the user can curate the source
+ * list before the LLM writes anything.
+ */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, topic, directory, autoCompile = true } = body;
+    const { name, topic, directory } = body;
 
     if (!name || !topic || !directory) {
       return NextResponse.json(
@@ -42,55 +46,16 @@ export async function POST(request: Request) {
       .replace(/^-|-$/g, "");
     const brainPath = path.join(directory, slug);
 
-    // Initialize the wiki folder structure
+    // Initialize the wiki folder structure on disk.
     initWikiDir(brainPath, topic);
 
-    let pageCount = 0;
-    let sourceCount = 0;
-
-    if (autoCompile) {
-      // Search for papers
-      const papers = await searchPapers(topic, 10);
-      sourceCount = papers.length;
-
-      if (papers.length > 0) {
-        appendLog(brainPath, "search", `Found ${papers.length} papers for "${topic}"`);
-
-        // Save raw sources
-        for (const paper of papers) {
-          const rawContent = `# ${paper.title}\n\n**Authors:** ${paper.authors.join(", ")}\n**Year:** ${paper.year || "n.d."}\n**Citations:** ${paper.citationCount}\n**URL:** ${paper.url}\n\n## Abstract\n\n${paper.abstract || "No abstract available."}`;
-          const rawId = paper.id.replace(/[^a-zA-Z0-9-]/g, "-");
-          const fs = await import("fs");
-          const rawDir = path.join(brainPath, "raw");
-          if (!fs.existsSync(rawDir)) fs.mkdirSync(rawDir, { recursive: true });
-          fs.writeFileSync(
-            path.join(rawDir, `${rawId}.md`),
-            rawContent,
-            "utf-8"
-          );
-        }
-
-        // Compile wiki via LLM
-        const result = await compileWiki(topic, papers);
-        const pages = result.pages;
-
-        for (const [pageId, page] of Object.entries(pages)) {
-          writePage(brainPath, {
-            id: pageId,
-            title: page.title,
-            type: page.type,
-            content: page.content,
-            links: page.links,
-            sources: page.sources,
-          });
-          appendLog(brainPath, "compile", `Created page: ${page.title}`);
-          pageCount++;
-        }
-
-        rebuildIndex(brainPath, topic);
-        appendLog(brainPath, "compile", `Wiki compiled: ${pageCount} pages from ${sourceCount} sources`);
-      }
-    }
+    // Search for papers across all three sources. No wiki generation yet.
+    const papers = await searchAllSources(topic, 10);
+    appendLog(
+      brainPath,
+      "search",
+      `Found ${papers.length} papers across Semantic Scholar, arXiv, OpenAlex`
+    );
 
     const now = new Date().toISOString();
     const brain = {
@@ -104,7 +69,11 @@ export async function POST(request: Request) {
 
     registerBrain(brain);
 
-    return NextResponse.json({ brain, pageCount, sourceCount });
+    return NextResponse.json({
+      brain,
+      papers,
+      status: "pending_review",
+    });
   } catch (error: any) {
     console.error("Create brain error:", error);
     return NextResponse.json(
