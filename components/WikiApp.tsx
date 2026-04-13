@@ -719,6 +719,18 @@ export default function WikiApp() {
               </div>
             </div>
           </div>
+
+          <p
+            className="mt-6"
+            style={{
+              fontFamily: "IBM Plex Mono",
+              fontSize: 11,
+              color: "#5a5a6c",
+              lineHeight: 1.6,
+            }}
+          >
+            Note: <span style={{ color: "#7a7a8c" }}>remove</span> only unregisters the brain from Distill &mdash; the folder on disk is left intact. Delete it manually from your filesystem if you want it gone for good.
+          </p>
         </div>
       </div>
     );
