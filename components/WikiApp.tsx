@@ -42,6 +42,26 @@ interface Paper {
   arxivId?: string;
 }
 
+type TokenOperation = "compile" | "ingest" | "query" | "lint";
+
+interface OperationBreakdown {
+  input: number;
+  output: number;
+  count: number;
+}
+
+interface TokenSummary {
+  total_input: number;
+  total_output: number;
+  total_tokens: number;
+  by_operation: Record<TokenOperation, OperationBreakdown>;
+  estimated_cost_usd: number;
+  estimated_tokens_without_wiki: number;
+  tokens_saved: number;
+  model: string;
+  provider: string;
+}
+
 type Screen = "brains" | "create" | "review" | "loading" | "wiki";
 
 // ─── Source badges ───
@@ -56,6 +76,17 @@ const SOURCE_COLORS: Record<Paper["source_api"], { fg: string; bg: string }> = {
   arxiv: { fg: "#d4a855", bg: "rgba(212,168,85,0.12)" },
   openalex: { fg: "#7ec99a", bg: "rgba(126,201,154,0.12)" },
 };
+
+function formatInt(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+function formatCost(usd: number): string {
+  if (usd === 0) return "$0.00";
+  if (usd < 0.01) return "<$0.01";
+  if (usd < 1) return `$${usd.toFixed(3)}`;
+  return `$${usd.toFixed(2)}`;
+}
 
 function SourceBadge({ source }: { source: Paper["source_api"] }) {
   const c = SOURCE_COLORS[source];
@@ -431,6 +462,10 @@ export default function WikiApp() {
   const [linting, setLinting] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
 
+  // Token usage stats for the active brain
+  const [tokenSummary, setTokenSummary] = useState<TokenSummary | null>(null);
+  const [tokenStatsOpen, setTokenStatsOpen] = useState(false);
+
   // Load brains on mount
   useEffect(() => {
     loadBrains();
@@ -446,6 +481,17 @@ export default function WikiApp() {
     }
   };
 
+  const loadTokenSummary = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/brains/${id}/tokens`);
+      const data = await res.json();
+      if (data.error) return;
+      setTokenSummary(data);
+    } catch {
+      // non-fatal — token stats are optional UI
+    }
+  }, []);
+
   const loadBrain = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/brains/${id}`);
@@ -457,10 +503,11 @@ export default function WikiApp() {
       const overview = (data.pages || []).find((p: WikiPage) => p.type === "overview");
       setActivePage(overview?.id || data.pages?.[0]?.id || null);
       setScreen("wiki");
+      loadTokenSummary(id);
     } catch (e: any) {
       setError(e.message);
     }
-  }, []);
+  }, [loadTokenSummary]);
 
   const browseTo = useCallback(async (dirPath?: string) => {
     try {
@@ -691,12 +738,13 @@ export default function WikiApp() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setQueryAnswer(data.answer);
+      loadTokenSummary(activeBrain.id);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setQuerying(false);
     }
-  }, [queryText, activeBrain]);
+  }, [queryText, activeBrain, loadTokenSummary]);
 
   const handleSaveQueryAsPage = useCallback(async () => {
     if (!queryText.trim() || !activeBrain) return;
@@ -727,12 +775,13 @@ export default function WikiApp() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setLintResult(data);
+      loadTokenSummary(activeBrain.id);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLinting(false);
     }
-  }, [activeBrain]);
+  }, [activeBrain, loadTokenSummary]);
 
   const handleExport = useCallback(async () => {
     if (!activeBrain) return;
@@ -1741,6 +1790,98 @@ export default function WikiApp() {
             </button>
           ))}
         </div>
+
+        {/* Token usage stats */}
+        {tokenSummary && tokenSummary.total_tokens > 0 && (
+          <div style={{ borderBottom: "1px solid #1e1e2e" }}>
+            <button
+              onClick={() => setTokenStatsOpen((o) => !o)}
+              className="w-full text-left px-3 py-2"
+              style={{
+                fontFamily: "IBM Plex Mono",
+                fontSize: 10,
+                color: "#7a7a8c",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+              }}
+              title="Click to toggle breakdown"
+            >
+              {formatInt(tokenSummary.total_tokens)} tokens ·{" "}
+              {formatCost(tokenSummary.estimated_cost_usd)}
+              {tokenSummary.by_operation.query.count > 0 &&
+                tokenSummary.tokens_saved > 0 && (() => {
+                  const ratio =
+                    tokenSummary.estimated_tokens_without_wiki /
+                    Math.max(1, tokenSummary.total_tokens);
+                  return (
+                    <>
+                      {" · "}
+                      <span style={{ color: "#7ec99a" }}>
+                        ~{ratio.toFixed(1)}x more efficient than RAG
+                      </span>
+                    </>
+                  );
+                })()}
+              <span style={{ float: "right", color: "#4a4a5c" }}>
+                {tokenStatsOpen ? "▾" : "▸"}
+              </span>
+            </button>
+            {tokenStatsOpen && (
+              <div
+                className="px-3 pb-2"
+                style={{
+                  fontFamily: "IBM Plex Mono",
+                  fontSize: 10,
+                  color: "#7a7a8c",
+                }}
+              >
+                <div style={{ color: "#4a4a5c", marginBottom: 4 }}>
+                  {tokenSummary.provider} · {tokenSummary.model}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", rowGap: 2, columnGap: 8 }}>
+                  <div style={{ color: "#4a4a5c" }}>in</div>
+                  <div />
+                  <div>{formatInt(tokenSummary.total_input)}</div>
+                  <div style={{ color: "#4a4a5c" }}>out</div>
+                  <div />
+                  <div>{formatInt(tokenSummary.total_output)}</div>
+                </div>
+                <div style={{ color: "#4a4a5c", marginTop: 6, marginBottom: 2 }}>
+                  by operation
+                </div>
+                {(["compile", "ingest", "query", "lint"] as const).map((op) => {
+                  const b = tokenSummary.by_operation[op];
+                  if (b.count === 0) return null;
+                  return (
+                    <div
+                      key={op}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "60px 1fr auto",
+                        columnGap: 8,
+                      }}
+                    >
+                      <span style={{ color: "#7a7a8c" }}>{op}</span>
+                      <span style={{ color: "#4a4a5c" }}>×{b.count}</span>
+                      <span>{formatInt(b.input + b.output)}</span>
+                    </div>
+                  );
+                })}
+                {tokenSummary.by_operation.query.count > 0 && (
+                  <div style={{ marginTop: 6, color: "#4a4a5c" }}>
+                    RAG baseline: {formatInt(tokenSummary.estimated_tokens_without_wiki)} tokens
+                    <br />
+                    saved:{" "}
+                    <span style={{ color: "#7ec99a" }}>
+                      {formatInt(tokenSummary.tokens_saved)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-2">
           {sidebarTab === "pages" &&
