@@ -1,6 +1,6 @@
 /**
  * Wiki Filesystem Layer
- * Reads and writes the wiki as real .md files on disk.
+ * Reads and writes a brain as real .md files on disk.
  * Uses gray-matter for frontmatter parsing/serialization.
  */
 
@@ -8,10 +8,12 @@ import fs from "fs";
 import path from "path";
 import matter from "gray-matter";
 
+export type PageType = "overview" | "concept" | "entity" | "source" | "analysis";
+
 export interface WikiPage {
   id: string;
   title: string;
-  type: "overview" | "concept" | "entity" | "source" | "analysis";
+  type: PageType;
   content: string;
   links: string[];
   sources: string[];
@@ -26,7 +28,26 @@ export interface LogEntry {
   detail: string;
 }
 
-const TYPE_DIRS: Record<string, string> = {
+export interface RawSourceMeta {
+  id: string;
+  filepath: string;
+  title?: string;
+  authors?: string;
+  year?: number | string;
+  citations?: number;
+  url?: string;
+  source_api?: string;
+  paper_id?: string;
+  arxiv_id?: string;
+  ingested?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Subdirectory under the brain root where each page type is stored.
+ * Overview is special: it's a single file `wiki/overview.md`.
+ */
+const TYPE_DIRS: Record<PageType, string> = {
   overview: "wiki",
   concept: "wiki/concepts",
   entity: "wiki/entities",
@@ -34,29 +55,155 @@ const TYPE_DIRS: Record<string, string> = {
   analysis: "wiki/analyses",
 };
 
-const SCHEMA_CONTENT = `# Wiki Schema
+const SCHEMA_TEMPLATE = `# Distill Wiki Schema
+
+**Topic**: {TOPIC}
+**Created**: {DATE}
 
 ## Page Types
-- **overview**: High-level summary of the entire topic
-- **concept**: A key idea, technique, or theory
-- **entity**: A person, organization, dataset, or tool
-- **source**: Summary of a specific paper or resource
-- **analysis**: Cross-cutting analysis or comparison
 
-## Conventions
-- Page IDs use kebab-case (e.g., "attention-mechanism")
-- Cross-references use [[Wiki Link]] syntax matching page titles
-- Each page has YAML frontmatter with: title, type, sources, links, created, updated
-- Content should be substantive (3-6 paragraphs per page)
+### overview
+The main synthesis page. One per brain. Summarizes the entire topic by synthesizing all sources into a coherent narrative. Must link to all major concept and entity pages.
+
+### concept
+A key idea, method, technique, or theory. Explains what it is, why it matters, and how it connects to other concepts. Must link to at least 2 other pages.
+
+### entity
+A specific model, dataset, system, organization, or person. Factual and detailed. Includes key contributions and relationships to other entities.
+
+### source
+A summary of a single paper or article. Covers key contributions, methods, findings, and significance. This is the LLM's interpretation of the raw source — how it connects to the broader topic.
+
+### analysis
+A saved answer to a user's question. Created only when the user explicitly chooses to save a query response. Contains the question, the synthesized answer, and citations to wiki pages.
+
+## File Conventions
+
+- **Filenames**: kebab-case, no spaces. Examples: \`attention-mechanism.md\`, \`vaswani-2017-summary.md\`
+- **Source pages**: named \`{author}-{year}-summary.md\` to distinguish from raw sources
+- **Frontmatter**: every wiki page MUST have YAML frontmatter with these fields:
+  \`\`\`yaml
+  ---
+  title: Page Title
+  type: concept|entity|source|overview|analysis
+  links: [other-page-id, another-page-id]
+  created: YYYY-MM-DD
+  updated: YYYY-MM-DD
+  ---
+  \`\`\`
+  Optional frontmatter: \`sources: [raw-source-id]\` to track which raw sources informed this page.
+
+## Content Conventions
+
+- Use \`[[Page Title]]\` for internal wiki links
+- Use \`**bold**\` for key terms on first mention
+- Use \`## Heading\` for sections within a page
+- Flag contradictions explicitly: \`> ⚠️ Contradiction: [[Page A]] claims X, but [[Page B]] found Y.\`
+- When updating a page with new information, preserve existing content — append or revise, never replace wholesale
+- Every page should have substantive content: 3-6 paragraphs minimum
+
+## Cross-Referencing Rules
+
+- Every concept page must link to at least 2 other wiki pages
+- Every source summary must link to the concepts it discusses
+- The overview must link to all major concept and entity pages
+- When a new source contradicts an existing claim, note it on BOTH pages
+- Prefer specific links over vague ones: link to [[Self-Attention]] not [[concepts]]
+
+## Operations
+
+### On Ingest
+1. Read the raw source
+2. Create or update \`wiki/sources/{author}-{year}-summary.md\`
+3. Update any existing concept/entity pages that the new source is relevant to
+4. Create new concept/entity pages if the source introduces genuinely new ideas
+5. Update \`wiki/overview.md\` to mention the new source
+6. Rebuild \`index.md\`
+7. Append to \`log.md\`
+
+### On Query
+1. Read \`index.md\` to find relevant pages
+2. Read those pages
+3. Synthesize an answer with [[wiki links]] as citations
+4. If user saves the answer: write to \`wiki/analyses/\`
+
+### On Lint
+1. Read all wiki pages
+2. Check for: orphan pages, contradictions, missing links, thin pages, gaps
+3. Report issues and suggest improvements
 `;
 
+/** `YYYY-MM-DD` in local time. */
+function today(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** `YYYY-MM-DD HH:MM:SS` in local time — the parseable log prefix format. */
+function timestamp(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const h = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  return `${y}-${mo}-${day} ${h}:${mi}:${s}`;
+}
+
+/** Ensure a relative filepath uses forward slashes for display/storage. */
+function toPosix(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
 /**
- * Initialize a new wiki directory structure.
+ * Render the initial (empty) `index.md` body.
+ * Every category is shown, empty ones marked "(none yet)".
  */
-export function initWikiDir(wikiDir: string, topic: string): void {
+function renderIndexContent(topic: string, grouped: Record<PageType, WikiPage[]>): string {
+  const sections: Array<{ key: PageType; heading: string }> = [
+    { key: "overview", heading: "Overview" },
+    { key: "concept", heading: "Concepts" },
+    { key: "entity", heading: "Entities" },
+    { key: "source", heading: "Sources" },
+    { key: "analysis", heading: "Analyses" },
+  ];
+
+  let body = `\n# ${topic} — Wiki Index\n`;
+
+  for (const { key, heading } of sections) {
+    body += `\n## ${heading}\n\n`;
+    const pages = grouped[key] || [];
+    if (pages.length === 0) {
+      body += `_(none yet)_\n`;
+      continue;
+    }
+    const sorted = [...pages].sort((a, b) => a.title.localeCompare(b.title));
+    for (const page of sorted) {
+      const srcCount = page.sources?.length || 0;
+      const suffix =
+        key === "source" || key === "analysis"
+          ? `— ${key}`
+          : `— ${key} (${srcCount} source${srcCount === 1 ? "" : "s"})`;
+      body += `- [[${page.title}]] ${suffix}\n`;
+    }
+  }
+
+  return body;
+}
+
+/**
+ * Initialize a new brain directory structure.
+ * Creates all subdirectories and seed files (SCHEMA.md, index.md, log.md).
+ */
+export function initWikiDir(dirPath: string, topic: string): void {
   const dirs = [
     "",
     "raw",
+    "raw/assets",
     "wiki",
     "wiki/concepts",
     "wiki/entities",
@@ -66,39 +213,42 @@ export function initWikiDir(wikiDir: string, topic: string): void {
   ];
 
   for (const dir of dirs) {
-    const full = path.join(wikiDir, dir);
+    const full = path.join(dirPath, dir);
     if (!fs.existsSync(full)) {
       fs.mkdirSync(full, { recursive: true });
     }
   }
 
-  // Write SCHEMA.md
-  fs.writeFileSync(path.join(wikiDir, "SCHEMA.md"), SCHEMA_CONTENT, "utf-8");
+  const date = today();
 
-  // Write initial index.md
-  const indexContent = `---
-title: Index
-topic: ${topic}
-generated: ${new Date().toISOString().split("T")[0]}
----
+  // SCHEMA.md — full template with {TOPIC}/{DATE} replaced
+  const schema = SCHEMA_TEMPLATE.replace(/\{TOPIC\}/g, topic).replace(
+    /\{DATE\}/g,
+    date
+  );
+  fs.writeFileSync(path.join(dirPath, "SCHEMA.md"), schema, "utf-8");
 
-# ${topic} — Wiki Index
+  // index.md — empty skeleton with all five categories
+  const emptyGrouped: Record<PageType, WikiPage[]> = {
+    overview: [],
+    concept: [],
+    entity: [],
+    source: [],
+    analysis: [],
+  };
+  const indexBody = renderIndexContent(topic, emptyGrouped);
+  const indexFile = matter.stringify(indexBody, { title: "Index", updated: date });
+  fs.writeFileSync(path.join(dirPath, "index.md"), indexFile, "utf-8");
 
-_No pages yet. Run a compile or ingest operation to populate._
-`;
-  fs.writeFileSync(path.join(wikiDir, "index.md"), indexContent, "utf-8");
-
-  // Write initial log.md
-  const logContent = `# Operations Log
-
-## [${new Date().toISOString()}] init | Created wiki for "${topic}"
-`;
-  fs.writeFileSync(path.join(wikiDir, "log.md"), logContent, "utf-8");
+  // log.md — header plus initial init entry
+  const logContent =
+    `# Wiki Log\n\n## [${timestamp()}] init | Created brain for "${topic}"\n`;
+  fs.writeFileSync(path.join(dirPath, "log.md"), logContent, "utf-8");
 }
 
 /**
- * Write a page to disk as a markdown file with frontmatter.
- * Returns the relative filepath.
+ * Write a wiki page to disk as a markdown file with YAML frontmatter.
+ * Returns the relative filepath (posix-style) under the brain root.
  */
 export function writePage(
   wikiDir: string,
@@ -109,46 +259,55 @@ export function writePage(
     content: string;
     links?: string[];
     sources?: string[];
+    created?: string;
   }
 ): string {
-  const typeDir = TYPE_DIRS[page.type] || "wiki";
+  const type = (page.type as PageType) in TYPE_DIRS ? (page.type as PageType) : "concept";
+  const typeDir = TYPE_DIRS[type];
+
   const dir = path.join(wikiDir, typeDir);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  const now = new Date().toISOString().split("T")[0];
-  const filepath = path.join(typeDir, `${page.id}.md`);
-  const fullPath = path.join(wikiDir, filepath);
+  // Overview is a single fixed file; all other types use `{id}.md`.
+  const filename = type === "overview" ? "overview.md" : `${page.id}.md`;
+  const relFilepath = toPosix(path.join(typeDir, filename));
+  const fullPath = path.join(wikiDir, relFilepath);
 
-  // Preserve created date if file already exists
-  let created = now;
+  const now = today();
+
+  // Preserve the original created date if the file already exists.
+  let created = page.created || now;
   if (fs.existsSync(fullPath)) {
     try {
       const existing = matter(fs.readFileSync(fullPath, "utf-8"));
-      created = existing.data.created || now;
+      if (existing.data.created) created = existing.data.created;
     } catch {
-      // ignore parse errors
+      // ignore parse errors — fall through to `now`
     }
   }
 
-  const frontmatter = {
+  const frontmatter: Record<string, unknown> = {
     title: page.title,
-    type: page.type,
-    sources: page.sources || [],
+    type,
     links: page.links || [],
     created,
     updated: now,
   };
+  // `sources` is optional per the schema — only include it if provided.
+  if (page.sources && page.sources.length > 0) {
+    frontmatter.sources = page.sources;
+  }
 
   const fileContent = matter.stringify(page.content, frontmatter);
   fs.writeFileSync(fullPath, fileContent, "utf-8");
 
-  return filepath;
+  return relFilepath;
 }
 
 /**
- * Read a single page by its relative filepath.
+ * Read a single page by its relative filepath (relative to the brain root).
  */
 export function readPage(wikiDir: string, filepath: string): WikiPage | null {
   const fullPath = path.join(wikiDir, filepath);
@@ -162,11 +321,11 @@ export function readPage(wikiDir: string, filepath: string): WikiPage | null {
     return {
       id,
       title: parsed.data.title || id,
-      type: parsed.data.type || "concept",
+      type: (parsed.data.type as PageType) || "concept",
       content: parsed.content.trim(),
       links: parsed.data.links || [],
       sources: parsed.data.sources || [],
-      filepath,
+      filepath: toPosix(filepath),
       created: parsed.data.created || "",
       updated: parsed.data.updated || "",
     };
@@ -176,7 +335,7 @@ export function readPage(wikiDir: string, filepath: string): WikiPage | null {
 }
 
 /**
- * Recursively read all .md files under wiki/ and return as WikiPage[].
+ * Recursively read all .md files under `wiki/` and return them as WikiPage[].
  */
 export function readAllPages(wikiDir: string): WikiPage[] {
   const wikiPath = path.join(wikiDir, "wiki");
@@ -191,7 +350,7 @@ export function readAllPages(wikiDir: string): WikiPage[] {
       if (entry.isDirectory()) {
         walk(full);
       } else if (entry.name.endsWith(".md")) {
-        const relative = path.relative(wikiDir, full).replace(/\\/g, "/");
+        const relative = toPosix(path.relative(wikiDir, full));
         const page = readPage(wikiDir, relative);
         if (page) pages.push(page);
       }
@@ -203,46 +362,35 @@ export function readAllPages(wikiDir: string): WikiPage[] {
 }
 
 /**
- * Rebuild index.md from all current pages.
+ * Rebuild `index.md` from all current wiki pages.
+ * Grouped by type; empty sections render as "(none yet)".
  */
 export function rebuildIndex(wikiDir: string, topic: string): void {
   const pages = readAllPages(wikiDir);
 
-  const grouped: Record<string, WikiPage[]> = {};
-  for (const page of pages) {
-    if (!grouped[page.type]) grouped[page.type] = [];
-    grouped[page.type].push(page);
-  }
-
-  const typeOrder = ["overview", "concept", "entity", "source", "analysis"];
-  let content = "";
-
-  for (const type of typeOrder) {
-    const group = grouped[type];
-    if (!group || group.length === 0) continue;
-    content += `\n## ${type.charAt(0).toUpperCase() + type.slice(1)}s\n\n`;
-    for (const page of group.sort((a, b) => a.title.localeCompare(b.title))) {
-      content += `- [[${page.title}]] — \`${page.filepath}\`\n`;
-    }
-  }
-
-  const frontmatter = {
-    title: "Index",
-    topic,
-    pages: pages.length,
-    generated: new Date().toISOString().split("T")[0],
+  const grouped: Record<PageType, WikiPage[]> = {
+    overview: [],
+    concept: [],
+    entity: [],
+    source: [],
+    analysis: [],
   };
+  for (const page of pages) {
+    if (grouped[page.type]) grouped[page.type].push(page);
+  }
 
-  const fileContent = matter.stringify(
-    `\n# ${topic} — Wiki Index\n\n${pages.length} pages\n${content}`,
-    frontmatter
-  );
+  const body = renderIndexContent(topic, grouped);
+  const fileContent = matter.stringify(body, {
+    title: "Index",
+    updated: today(),
+  });
 
   fs.writeFileSync(path.join(wikiDir, "index.md"), fileContent, "utf-8");
 }
 
 /**
- * Append an entry to log.md.
+ * Append a timestamped entry to `log.md`.
+ * Format: `## [YYYY-MM-DD HH:MM:SS] {action} | {detail}`
  */
 export function appendLog(
   wikiDir: string,
@@ -250,17 +398,17 @@ export function appendLog(
   detail: string
 ): void {
   const logPath = path.join(wikiDir, "log.md");
-  const entry = `\n## [${new Date().toISOString()}] ${action} | ${detail}\n`;
+  const entry = `\n## [${timestamp()}] ${action} | ${detail}\n`;
 
   if (fs.existsSync(logPath)) {
     fs.appendFileSync(logPath, entry, "utf-8");
   } else {
-    fs.writeFileSync(logPath, `# Operations Log\n${entry}`, "utf-8");
+    fs.writeFileSync(logPath, `# Wiki Log\n${entry}`, "utf-8");
   }
 }
 
 /**
- * Parse log.md into structured entries.
+ * Parse `log.md` into structured entries (newest last, file order preserved).
  */
 export function readLog(wikiDir: string): LogEntry[] {
   const logPath = path.join(wikiDir, "log.md");
@@ -269,8 +417,11 @@ export function readLog(wikiDir: string): LogEntry[] {
   const raw = fs.readFileSync(logPath, "utf-8");
   const entries: LogEntry[] = [];
 
-  const regex = /## \[(.+?)\] (.+?) \| (.+)/g;
-  let match;
+  // Match either the ISO timestamps written by older code or the new
+  // `YYYY-MM-DD HH:MM:SS` format. The capture simply grabs whatever is
+  // between the brackets.
+  const regex = /^## \[(.+?)\] (.+?) \| (.+)$/gm;
+  let match: RegExpExecArray | null;
   while ((match = regex.exec(raw)) !== null) {
     entries.push({
       date: match[1],
@@ -283,7 +434,8 @@ export function readLog(wikiDir: string): LogEntry[] {
 }
 
 /**
- * Save a raw source document to raw/.
+ * Save a raw source document to `raw/{id}.md`. Raw sources are immutable
+ * once written — callers should never re-save or mutate them.
  */
 export function saveRawSource(
   wikiDir: string,
@@ -295,7 +447,40 @@ export function saveRawSource(
     fs.mkdirSync(rawDir, { recursive: true });
   }
 
-  const filepath = path.join("raw", `${id}.md`);
-  fs.writeFileSync(path.join(wikiDir, filepath), content, "utf-8");
-  return filepath;
+  const relFilepath = toPosix(path.join("raw", `${id}.md`));
+  fs.writeFileSync(path.join(wikiDir, relFilepath), content, "utf-8");
+  return relFilepath;
+}
+
+/**
+ * List all raw sources under `raw/` with their frontmatter metadata.
+ * Ignores `raw/assets/` and any non-.md files.
+ */
+export function listRawSources(wikiDir: string): RawSourceMeta[] {
+  const rawDir = path.join(wikiDir, "raw");
+  if (!fs.existsSync(rawDir)) return [];
+
+  const sources: RawSourceMeta[] = [];
+  const entries = fs.readdirSync(rawDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+
+    const relFilepath = toPosix(path.join("raw", entry.name));
+    const fullPath = path.join(wikiDir, relFilepath);
+
+    try {
+      const raw = fs.readFileSync(fullPath, "utf-8");
+      const parsed = matter(raw);
+      sources.push({
+        id: path.basename(entry.name, ".md"),
+        filepath: relFilepath,
+        ...(parsed.data as Record<string, unknown>),
+      });
+    } catch {
+      // skip unreadable / unparseable files
+    }
+  }
+
+  return sources;
 }
