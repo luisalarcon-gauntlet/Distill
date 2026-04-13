@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { getBrain } from "@/lib/config";
-import { readAllPages, writePage, rebuildIndex, appendLog } from "@/lib/wiki-fs";
+import {
+  readAllPages,
+  writePage,
+  rebuildIndex,
+  appendLog,
+  appendTokenUsage,
+} from "@/lib/wiki-fs";
 import { llm } from "@/lib/llm";
 
 export async function POST(
@@ -35,6 +41,7 @@ export async function POST(
     const prompt = `Wiki content:\n\n${wikiContext}\n\n---\n\nQuestion: ${question}`;
 
     const response = await llm(system, prompt, 4096);
+    appendTokenUsage(brain.path, "query", response.usage);
     appendLog(brain.path, "query", `Question: ${question.slice(0, 100)}`);
 
     let savedAsPage: string | null = null;

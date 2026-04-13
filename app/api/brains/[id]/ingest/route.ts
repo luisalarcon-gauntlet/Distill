@@ -6,6 +6,7 @@ import {
   rebuildIndex,
   appendLog,
   saveRawSource,
+  appendTokenUsage,
 } from "@/lib/wiki-fs";
 import {
   searchAllSources,
@@ -75,7 +76,8 @@ export async function POST(
 
     for (const paper of papers) {
       const existingPages = readAllPages(brain.path);
-      const result = await ingestSource(existingPages, paper);
+      const { result, usage } = await ingestSource(existingPages, paper);
+      appendTokenUsage(brain.path, "ingest", usage);
 
       for (const page of result.updated || []) {
         writePage(brain.path, {

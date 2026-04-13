@@ -12,10 +12,17 @@ interface LLMConfig {
   model?: string;
 }
 
-interface LLMResponse {
-  text: string;
-  usage?: { input_tokens: number; output_tokens: number };
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
 }
+
+export interface LLMResponse {
+  text: string;
+  usage: TokenUsage;
+}
+
+const ZERO_USAGE: TokenUsage = { input_tokens: 0, output_tokens: 0 };
 
 function getConfig(): LLMConfig {
   // Prefer Anthropic, fall back to OpenAI
@@ -67,7 +74,12 @@ async function callAnthropic(
   const data = await res.json();
   return {
     text: data.content?.map((c: any) => c.text || "").join("") || "",
-    usage: data.usage,
+    usage: data.usage
+      ? {
+          input_tokens: data.usage.input_tokens ?? 0,
+          output_tokens: data.usage.output_tokens ?? 0,
+        }
+      : { ...ZERO_USAGE },
   };
 }
 
@@ -103,10 +115,10 @@ async function callOpenAI(
     text: data.choices?.[0]?.message?.content || "",
     usage: data.usage
       ? {
-          input_tokens: data.usage.prompt_tokens,
-          output_tokens: data.usage.completion_tokens,
+          input_tokens: data.usage.prompt_tokens ?? 0,
+          output_tokens: data.usage.completion_tokens ?? 0,
         }
-      : undefined,
+      : { ...ZERO_USAGE },
   };
 }
 
@@ -128,19 +140,20 @@ export async function llm(
 }
 
 /**
- * Send a prompt and parse the response as JSON.
+ * Send a prompt and parse the response as JSON. Returns both the parsed
+ * result and the raw token usage so callers can persist it.
  */
 export async function llmJSON<T = any>(
   system: string,
   prompt: string,
   maxTokens: number = 4096
-): Promise<T> {
+): Promise<{ data: T; usage: TokenUsage }> {
   const response = await llm(system, prompt, maxTokens);
   const cleaned = response.text
     .replace(/```json\s*/g, "")
     .replace(/```\s*/g, "")
     .trim();
-  return JSON.parse(cleaned);
+  return { data: JSON.parse(cleaned) as T, usage: response.usage };
 }
 
 export { getConfig };

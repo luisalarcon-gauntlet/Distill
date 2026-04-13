@@ -5,6 +5,7 @@ import {
   rebuildIndex,
   appendLog,
   saveRawSource,
+  appendTokenUsage,
 } from "@/lib/wiki-fs";
 import { compileWiki } from "@/lib/compiler";
 import { paperRawId, paperToRawMarkdown, type Paper } from "@/lib/papers";
@@ -47,7 +48,8 @@ export async function POST(
     );
 
     // Generate wiki pages via the LLM.
-    const result = await compileWiki(brain.topic, papers);
+    const { result, usage } = await compileWiki(brain.topic, papers);
+    appendTokenUsage(brain.path, "compile", usage);
     const pages = result.pages;
 
     let pageCount = 0;

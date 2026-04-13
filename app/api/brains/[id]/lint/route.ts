@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getBrain } from "@/lib/config";
-import { readAllPages, appendLog } from "@/lib/wiki-fs";
+import { readAllPages, appendLog, appendTokenUsage } from "@/lib/wiki-fs";
 import { lintWiki } from "@/lib/compiler";
 
 export async function POST(
@@ -14,7 +14,8 @@ export async function POST(
     }
 
     const pages = readAllPages(brain.path);
-    const result = await lintWiki(pages);
+    const { result, usage } = await lintWiki(pages);
+    appendTokenUsage(brain.path, "lint", usage);
 
     appendLog(
       brain.path,

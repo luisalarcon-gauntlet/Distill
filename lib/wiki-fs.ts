@@ -575,3 +575,204 @@ export function listRawSources(wikiDir: string): RawSourceMeta[] {
 
   return sources;
 }
+
+// ─── Token usage tracking ──────────────────────────────────────────────
+
+export type TokenOperation = "compile" | "ingest" | "query" | "lint";
+
+export interface TokenEvent {
+  operation: TokenOperation;
+  input_tokens: number;
+  output_tokens: number;
+  timestamp: string;
+}
+
+interface OperationBreakdown {
+  input: number;
+  output: number;
+  count: number;
+}
+
+export interface TokenSummary {
+  total_input: number;
+  total_output: number;
+  total_tokens: number;
+  by_operation: Record<TokenOperation, OperationBreakdown>;
+  estimated_cost_usd: number;
+  estimated_tokens_without_wiki: number;
+  tokens_saved: number;
+  model: string;
+  provider: string;
+}
+
+/** Per-million-token pricing for common models, in USD. */
+interface ModelPricing {
+  input: number;
+  output: number;
+}
+
+const MODEL_PRICING: Array<{ match: RegExp; pricing: ModelPricing }> = [
+  { match: /haiku/i, pricing: { input: 0.25, output: 1.25 } },
+  { match: /opus/i, pricing: { input: 15, output: 75 } },
+  { match: /sonnet/i, pricing: { input: 3, output: 15 } },
+  { match: /gpt-4o-mini/i, pricing: { input: 0.15, output: 0.6 } },
+  { match: /gpt-4o/i, pricing: { input: 2.5, output: 10 } },
+];
+
+const DEFAULT_PRICING: ModelPricing = { input: 3, output: 15 }; // Sonnet
+
+function pricingForModel(model: string): ModelPricing {
+  for (const { match, pricing } of MODEL_PRICING) {
+    if (match.test(model)) return pricing;
+  }
+  return DEFAULT_PRICING;
+}
+
+function detectModel(): { provider: string; model: string } {
+  if (process.env.ANTHROPIC_API_KEY) {
+    return {
+      provider: "anthropic",
+      model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
+    };
+  }
+  if (process.env.OPENAI_API_KEY) {
+    return {
+      provider: "openai",
+      model: process.env.OPENAI_MODEL || "gpt-4o",
+    };
+  }
+  return { provider: "unknown", model: "unknown" };
+}
+
+function tokensPath(wikiDir: string): string {
+  return path.join(wikiDir, "tokens.json");
+}
+
+/**
+ * Append a token usage event to `tokens.json`. Creates the file if missing.
+ */
+export function appendTokenUsage(
+  wikiDir: string,
+  operation: TokenOperation,
+  usage: { input_tokens: number; output_tokens: number }
+): void {
+  const filePath = tokensPath(wikiDir);
+  let events: TokenEvent[] = [];
+
+  if (fs.existsSync(filePath)) {
+    try {
+      const raw = fs.readFileSync(filePath, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) events = parsed;
+    } catch {
+      // start fresh on corrupt file
+      events = [];
+    }
+  }
+
+  events.push({
+    operation,
+    input_tokens: usage.input_tokens || 0,
+    output_tokens: usage.output_tokens || 0,
+    timestamp: new Date().toISOString(),
+  });
+
+  fs.writeFileSync(filePath, JSON.stringify(events, null, 2), "utf-8");
+}
+
+/**
+ * Read raw token events for a brain. Returns [] if no log exists yet.
+ */
+export function getTokenUsage(wikiDir: string): TokenEvent[] {
+  const filePath = tokensPath(wikiDir);
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Sum total characters across all raw source files under `raw/`.
+ * Used to estimate the "without wiki" baseline cost.
+ */
+function sumRawSourceChars(wikiDir: string): number {
+  const rawDir = path.join(wikiDir, "raw");
+  if (!fs.existsSync(rawDir)) return 0;
+
+  let total = 0;
+  const entries = fs.readdirSync(rawDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const content = fs.readFileSync(path.join(rawDir, entry.name), "utf-8");
+      total += content.length;
+    } catch {
+      // skip unreadable files
+    }
+  }
+  return total;
+}
+
+/**
+ * Aggregate token stats across all logged events for a brain. Includes
+ * a rough estimate of what a naive RAG-over-raw-sources approach would
+ * have cost for the same number of queries.
+ */
+export function getTokenSummary(wikiDir: string): TokenSummary {
+  const events = getTokenUsage(wikiDir);
+
+  const by_operation: Record<TokenOperation, OperationBreakdown> = {
+    compile: { input: 0, output: 0, count: 0 },
+    ingest: { input: 0, output: 0, count: 0 },
+    query: { input: 0, output: 0, count: 0 },
+    lint: { input: 0, output: 0, count: 0 },
+  };
+
+  let total_input = 0;
+  let total_output = 0;
+  let queryCount = 0;
+
+  for (const e of events) {
+    const op = by_operation[e.operation];
+    if (!op) continue;
+    op.input += e.input_tokens;
+    op.output += e.output_tokens;
+    op.count += 1;
+    total_input += e.input_tokens;
+    total_output += e.output_tokens;
+    if (e.operation === "query") queryCount += 1;
+  }
+
+  const total_tokens = total_input + total_output;
+
+  const { provider, model } = detectModel();
+  const pricing = pricingForModel(model);
+  const estimated_cost_usd =
+    (total_input / 1_000_000) * pricing.input +
+    (total_output / 1_000_000) * pricing.output;
+
+  // Without-wiki baseline: every query would ship all raw sources as context.
+  const rawChars = sumRawSourceChars(wikiDir);
+  const rawTokens = Math.round(rawChars / 4);
+  const estimated_tokens_without_wiki = rawTokens * queryCount;
+  const tokens_saved = Math.max(
+    0,
+    estimated_tokens_without_wiki - total_tokens
+  );
+
+  return {
+    total_input,
+    total_output,
+    total_tokens,
+    by_operation,
+    estimated_cost_usd,
+    estimated_tokens_without_wiki,
+    tokens_saved,
+    model,
+    provider,
+  };
+}

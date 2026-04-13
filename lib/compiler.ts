@@ -4,7 +4,7 @@
  * This is the core of Distill — the "compiled wiki" pattern.
  */
 
-import { llmJSON } from "./llm";
+import { llmJSON, type TokenUsage } from "./llm";
 import type { Paper } from "./papers";
 import type { WikiPage } from "./wiki-fs";
 
@@ -47,7 +47,7 @@ Return ONLY valid JSON, no markdown fences.`;
 export async function compileWiki(
   topic: string,
   papers: Paper[]
-): Promise<{ pages: Record<string, CompilerPage> }> {
+): Promise<{ result: { pages: Record<string, CompilerPage> }; usage: TokenUsage }> {
   const paperContext = papers
     .map(
       (p, i) =>
@@ -81,7 +81,12 @@ Requirements:
 - The overview must link to all other pages
 - Total: 6-10 pages`;
 
-  return llmJSON<WikiCompilation>(SYSTEM_PROMPT, prompt, 8192);
+  const { data, usage } = await llmJSON<WikiCompilation>(
+    SYSTEM_PROMPT,
+    prompt,
+    8192
+  );
+  return { result: data, usage };
 }
 
 /**
@@ -90,7 +95,10 @@ Requirements:
 export async function ingestSource(
   existingPages: WikiPage[],
   newPaper: Paper
-): Promise<{ updated: CompilerPage[]; created: CompilerPage[] }> {
+): Promise<{
+  result: { updated: CompilerPage[]; created: CompilerPage[] };
+  usage: TokenUsage;
+}> {
   const existingContext = existingPages
     .map(
       (p) =>
@@ -124,7 +132,11 @@ Rules:
 - Maintain all [[Wiki Links]] and cross-references
 - For updated pages, return the COMPLETE new content (not just the diff)`;
 
-  return llmJSON(SYSTEM_PROMPT, prompt, 8192);
+  const { data, usage } = await llmJSON<{
+    updated: CompilerPage[];
+    created: CompilerPage[];
+  }>(SYSTEM_PROMPT, prompt, 8192);
+  return { result: data, usage };
 }
 
 /**
@@ -133,8 +145,11 @@ Rules:
 export async function lintWiki(
   pages: WikiPage[]
 ): Promise<{
-  issues: { type: string; description: string; page?: string }[];
-  suggestions: string[];
+  result: {
+    issues: { type: string; description: string; page?: string }[];
+    suggestions: string[];
+  };
+  usage: TokenUsage;
 }> {
   const context = pages
     .map(
@@ -165,5 +180,9 @@ Look for:
 - Pages with too few sources
 - Gaps where a web search could fill in missing data`;
 
-  return llmJSON(SYSTEM_PROMPT, prompt, 4096);
+  const { data, usage } = await llmJSON<{
+    issues: { type: string; description: string; page?: string }[];
+    suggestions: string[];
+  }>(SYSTEM_PROMPT, prompt, 4096);
+  return { result: data, usage };
 }
