@@ -196,6 +196,83 @@ function renderIndexContent(topic: string, grouped: Record<PageType, WikiPage[]>
 }
 
 /**
+ * Write Obsidian vault config files under `.obsidian/`.
+ * Makes the brain folder open cleanly as a vault with useful defaults:
+ * - wikilink format matches our `[[Page Title]]` convention
+ * - shortest-path resolution finds pages in nested subdirs
+ * - raw/, exports/, and SCHEMA.md are hidden from search and graph
+ * - graph nodes are color-coded by page type
+ */
+function writeObsidianConfig(dirPath: string): void {
+  const obsidianDir = path.join(dirPath, ".obsidian");
+
+  const appJson = {
+    useMarkdownLinks: false,
+    newLinkFormat: "shortest",
+    showFrontmatter: false,
+    readableLineLength: true,
+    userIgnoreFilters: ["raw/", "exports/", "SCHEMA.md"],
+  };
+
+  const graphJson = {
+    colorGroups: [
+      { query: "tag:#distill/overview", color: { a: 1, rgb: 12886783 } },
+      { query: "tag:#distill/concept", color: { a: 1, rgb: 9487615 } },
+      { query: "tag:#distill/entity", color: { a: 1, rgb: 8309402 } },
+      { query: "tag:#distill/source", color: { a: 1, rgb: 13936725 } },
+      { query: "tag:#distill/analysis", color: { a: 1, rgb: 13920362 } },
+    ],
+  };
+
+  const appearanceJson = {
+    baseFontSize: 16,
+    theme: "obsidian",
+  };
+
+  fs.writeFileSync(
+    path.join(obsidianDir, "app.json"),
+    JSON.stringify(appJson, null, 2),
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(obsidianDir, "graph.json"),
+    JSON.stringify(graphJson, null, 2),
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(obsidianDir, "appearance.json"),
+    JSON.stringify(appearanceJson, null, 2),
+    "utf-8"
+  );
+}
+
+/**
+ * Write a top-level README.md that orients users opening the brain in Obsidian.
+ */
+function writeBrainReadme(dirPath: string, topic: string): void {
+  const body = `# ${topic}
+
+This is a [Distill](https://github.com/YOUR_USERNAME/distill) brain.
+
+Open \`index.md\` to browse the wiki, or use Obsidian's graph view to explore connections.
+
+## Structure
+
+- \`wiki/\` — LLM-generated knowledge pages
+- \`raw/\` — source documents (papers, articles)
+- \`index.md\` — catalog of all wiki pages
+- \`log.md\` — timeline of operations
+- \`SCHEMA.md\` — wiki conventions
+
+## Quick Links
+
+- [[Index]]
+- [[Overview]]
+`;
+  fs.writeFileSync(path.join(dirPath, "README.md"), body, "utf-8");
+}
+
+/**
  * Initialize a new brain directory structure.
  * Creates all subdirectories and seed files (SCHEMA.md, index.md, log.md).
  */
@@ -210,6 +287,7 @@ export function initWikiDir(dirPath: string, topic: string): void {
     "wiki/sources",
     "wiki/analyses",
     "exports",
+    ".obsidian",
   ];
 
   for (const dir of dirs) {
@@ -218,6 +296,10 @@ export function initWikiDir(dirPath: string, topic: string): void {
       fs.mkdirSync(full, { recursive: true });
     }
   }
+
+  // Seed Obsidian vault config so "Open folder as vault" works out of the box.
+  writeObsidianConfig(dirPath);
+  writeBrainReadme(dirPath, topic);
 
   const date = today();
 
@@ -288,9 +370,18 @@ export function writePage(
     }
   }
 
+  // Aliases let Obsidian resolve `[[Page Title]]` to `attention-mechanism.md`.
+  // Include both the human title and the kebab-case id, deduped.
+  const aliases: string[] = [page.title];
+  if (page.id && page.id !== page.title) {
+    aliases.push(page.id);
+  }
+
   const frontmatter: Record<string, unknown> = {
     title: page.title,
+    aliases,
     type,
+    tags: [`distill/${type}`],
     links: page.links || [],
     created,
     updated: now,
