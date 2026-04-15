@@ -21,6 +21,8 @@ import {
   appendLog,
   readLog,
   saveRawSource,
+  savePDFSource,
+  listPDFSources,
   appendTokenUsage,
   getTokenUsage,
   getTokenSummary,
@@ -76,11 +78,13 @@ describe("initWikiDir", () => {
     const expectedDirs = [
       "raw",
       "raw/assets",
+      "raw/pdfs",
       "wiki",
       "wiki/concepts",
       "wiki/entities",
       "wiki/sources",
       "wiki/analyses",
+      "wiki/lectures",
       "exports",
       ".obsidian",
     ];
@@ -111,12 +115,13 @@ describe("initWikiDir", () => {
     expect(parsed.data.updated).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it("index.md body contains topic heading and all five categories", () => {
+  it("index.md body contains topic heading and all six categories", () => {
     initWikiDir(tmpDir, "Transformers");
 
     const raw = readTmp("index.md");
     expect(raw).toContain("# Transformers — Wiki Index");
     expect(raw).toContain("## Overview");
+    expect(raw).toContain("## Lectures");
     expect(raw).toContain("## Concepts");
     expect(raw).toContain("## Entities");
     expect(raw).toContain("## Sources");
@@ -127,9 +132,31 @@ describe("initWikiDir", () => {
     initWikiDir(tmpDir, "Transformers");
 
     const raw = readTmp("index.md");
-    // Five categories, each empty initially
+    // Six categories, each empty initially
     const matches = (raw.match(/\(none yet\)/g) || []).length;
-    expect(matches).toBe(5);
+    expect(matches).toBe(6);
+  });
+
+  it("Lectures section appears between Overview and Concepts", () => {
+    initWikiDir(tmpDir, "Transformers");
+
+    const raw = readTmp("index.md");
+    const overviewIdx = raw.indexOf("## Overview");
+    const lecturesIdx = raw.indexOf("## Lectures");
+    const conceptsIdx = raw.indexOf("## Concepts");
+    expect(overviewIdx).toBeGreaterThanOrEqual(0);
+    expect(lecturesIdx).toBeGreaterThan(overviewIdx);
+    expect(conceptsIdx).toBeGreaterThan(lecturesIdx);
+  });
+
+  it("SCHEMA.md includes the lecture page type description", () => {
+    initWikiDir(tmpDir, "Transformers");
+
+    const schema = readTmp("SCHEMA.md");
+    expect(schema).toContain("### lecture");
+    expect(schema).toContain(
+      "A summary of a single lecture from a course curriculum. Covers key topics, concepts introduced, prerequisites from earlier lectures, and connections to other wiki pages. Includes a link to the raw PDF source."
+    );
   });
 
   it("creates log.md with an init entry", () => {
@@ -208,6 +235,32 @@ describe("writePage", () => {
   it("writes an analysis page to wiki/analyses/{id}.md", () => {
     writePage(tmpDir, makePage({ id: "why-attention-works", type: "analysis" }));
     expect(existsTmp("wiki/analyses/why-attention-works.md")).toBe(true);
+  });
+
+  it("writes a lecture page to wiki/lectures/{id}.md", () => {
+    writePage(tmpDir, makePage({ id: "lecture-01-intro", type: "lecture" }));
+    expect(existsTmp("wiki/lectures/lecture-01-intro.md")).toBe(true);
+  });
+
+  it("round-trips a lecture page via writePage/readPage", () => {
+    writePage(tmpDir, makePage({
+      id: "lecture-01-intro",
+      title: "Lecture 1: Introduction",
+      type: "lecture",
+      content: "Introduces course scope and prerequisites.",
+      links: ["attention-mechanism"],
+      sources: ["raw/pdfs/lecture1.pdf"],
+    }));
+
+    const page = readPage(tmpDir, "wiki/lectures/lecture-01-intro.md");
+    expect(page).not.toBeNull();
+    expect(page!.id).toBe("lecture-01-intro");
+    expect(page!.title).toBe("Lecture 1: Introduction");
+    expect(page!.type).toBe("lecture");
+    expect(page!.content).toBe("Introduces course scope and prerequisites.");
+    expect(page!.links).toEqual(["attention-mechanism"]);
+    expect(page!.sources).toEqual(["raw/pdfs/lecture1.pdf"]);
+    expect(page!.filepath).toBe("wiki/lectures/lecture-01-intro.md");
   });
 
   it("overview always writes to wiki/overview.md regardless of id", () => {
@@ -533,6 +586,26 @@ describe("rebuildIndex", () => {
     expect(content).toContain("2 sources");
   });
 
+  it("lists a lecture page in the Lectures section after rebuild", () => {
+    writePage(tmpDir, makePage({
+      id: "lecture-01-intro",
+      title: "Lecture 1: Introduction",
+      type: "lecture",
+    }));
+    rebuildIndex(tmpDir, "Transformers");
+
+    const content = readTmp("index.md");
+    expect(content).toContain("## Lectures");
+    expect(content).toContain("[[Lecture 1: Introduction]]");
+
+    // Ensure Lectures section still appears between Overview and Concepts
+    const overviewIdx = content.indexOf("## Overview");
+    const lecturesIdx = content.indexOf("## Lectures");
+    const conceptsIdx = content.indexOf("## Concepts");
+    expect(lecturesIdx).toBeGreaterThan(overviewIdx);
+    expect(conceptsIdx).toBeGreaterThan(lecturesIdx);
+  });
+
   it("source entries include '— source' suffix, not source count", () => {
     writePage(tmpDir, makePage({
       id: "vaswani-2017-summary",
@@ -652,6 +725,86 @@ describe("saveRawSource", () => {
   it("returned path uses forward slashes on all platforms", () => {
     const rel = saveRawSource(tmpDir, "slash-test", "content");
     expect(rel).not.toContain("\\");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 7b. savePDFSource / listPDFSources
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("savePDFSource / listPDFSources", () => {
+  beforeEach(() => initWikiDir(tmpDir, "Transformers"));
+
+  it("savePDFSource writes the buffer to raw/pdfs/{filename} and returns posix path", () => {
+    const buffer = Buffer.from("%PDF-1.4\nfake pdf bytes");
+    const rel = savePDFSource(tmpDir, "lecture1.pdf", buffer);
+    expect(rel).toBe("raw/pdfs/lecture1.pdf");
+    expect(rel).not.toContain("\\");
+    expect(existsTmp("raw/pdfs/lecture1.pdf")).toBe(true);
+  });
+
+  it("savePDFSource preserves exact buffer bytes on disk", () => {
+    const buffer = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0x01, 0x02, 0xff]);
+    savePDFSource(tmpDir, "bytes.pdf", buffer);
+    const onDisk = readFileSync(join(tmpDir, "raw/pdfs/bytes.pdf"));
+    expect(onDisk.equals(buffer)).toBe(true);
+  });
+
+  it("savePDFSource creates raw/pdfs/ if it does not exist", () => {
+    const bare = mkdtempSync(join(os.tmpdir(), "distill-pdfs-"));
+    try {
+      savePDFSource(bare, "lecture.pdf", Buffer.from("pdf"));
+      expect(existsSync(join(bare, "raw/pdfs/lecture.pdf"))).toBe(true);
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it("listPDFSources returns empty array when raw/pdfs/ is empty", () => {
+    expect(listPDFSources(tmpDir)).toEqual([]);
+  });
+
+  it("listPDFSources returns empty array when raw/pdfs/ does not exist", () => {
+    const bare = mkdtempSync(join(os.tmpdir(), "distill-no-pdfs-"));
+    try {
+      expect(listPDFSources(bare)).toEqual([]);
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it("listPDFSources returns saved PDFs with posix filepaths", () => {
+    savePDFSource(tmpDir, "lecture1.pdf", Buffer.from("a"));
+    savePDFSource(tmpDir, "lecture2.pdf", Buffer.from("b"));
+
+    const pdfs = listPDFSources(tmpDir);
+    expect(pdfs).toHaveLength(2);
+
+    const filenames = pdfs.map((p) => p.filename).sort();
+    expect(filenames).toEqual(["lecture1.pdf", "lecture2.pdf"]);
+
+    for (const pdf of pdfs) {
+      expect(pdf.filepath).toMatch(/^raw\/pdfs\//);
+      expect(pdf.filepath).not.toContain("\\");
+    }
+  });
+
+  it("listPDFSources filters out non-pdf files", () => {
+    savePDFSource(tmpDir, "real.pdf", Buffer.from("pdf"));
+    writeFileSync(join(tmpDir, "raw/pdfs/notes.txt"), "not a pdf", "utf-8");
+    writeFileSync(join(tmpDir, "raw/pdfs/image.png"), "fake png", "utf-8");
+
+    const pdfs = listPDFSources(tmpDir);
+    expect(pdfs).toHaveLength(1);
+    expect(pdfs[0].filename).toBe("real.pdf");
+  });
+
+  it("listPDFSources matches .pdf extension case-insensitively", () => {
+    savePDFSource(tmpDir, "upper.PDF", Buffer.from("a"));
+    savePDFSource(tmpDir, "mixed.Pdf", Buffer.from("b"));
+
+    const pdfs = listPDFSources(tmpDir);
+    expect(pdfs).toHaveLength(2);
   });
 });
 

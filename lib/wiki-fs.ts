@@ -8,7 +8,7 @@ import fs from "fs";
 import path from "path";
 import matter from "gray-matter";
 
-export type PageType = "overview" | "concept" | "entity" | "source" | "analysis";
+export type PageType = "overview" | "concept" | "entity" | "source" | "analysis" | "lecture";
 
 export interface WikiPage {
   id: string;
@@ -53,6 +53,7 @@ const TYPE_DIRS: Record<PageType, string> = {
   entity: "wiki/entities",
   source: "wiki/sources",
   analysis: "wiki/analyses",
+  lecture: "wiki/lectures",
 };
 
 const SCHEMA_TEMPLATE = `# Distill Wiki Schema
@@ -76,6 +77,9 @@ A summary of a single paper or article. Covers key contributions, methods, findi
 
 ### analysis
 A saved answer to a user's question. Created only when the user explicitly chooses to save a query response. Contains the question, the synthesized answer, and citations to wiki pages.
+
+### lecture
+A summary of a single lecture from a course curriculum. Covers key topics, concepts introduced, prerequisites from earlier lectures, and connections to other wiki pages. Includes a link to the raw PDF source.
 
 ## File Conventions
 
@@ -166,6 +170,7 @@ function toPosix(p: string): string {
 function renderIndexContent(topic: string, grouped: Record<PageType, WikiPage[]>): string {
   const sections: Array<{ key: PageType; heading: string }> = [
     { key: "overview", heading: "Overview" },
+    { key: "lecture", heading: "Lectures" },
     { key: "concept", heading: "Concepts" },
     { key: "entity", heading: "Entities" },
     { key: "source", heading: "Sources" },
@@ -281,11 +286,13 @@ export function initWikiDir(dirPath: string, topic: string): void {
     "",
     "raw",
     "raw/assets",
+    "raw/pdfs",
     "wiki",
     "wiki/concepts",
     "wiki/entities",
     "wiki/sources",
     "wiki/analyses",
+    "wiki/lectures",
     "exports",
     ".obsidian",
   ];
@@ -310,13 +317,14 @@ export function initWikiDir(dirPath: string, topic: string): void {
   );
   fs.writeFileSync(path.join(dirPath, "SCHEMA.md"), schema, "utf-8");
 
-  // index.md — empty skeleton with all five categories
+  // index.md — empty skeleton with all categories
   const emptyGrouped: Record<PageType, WikiPage[]> = {
     overview: [],
     concept: [],
     entity: [],
     source: [],
     analysis: [],
+    lecture: [],
   };
   const indexBody = renderIndexContent(topic, emptyGrouped);
   const indexFile = matter.stringify(indexBody, { title: "Index", updated: date });
@@ -465,6 +473,7 @@ export function rebuildIndex(wikiDir: string, topic: string): void {
     entity: [],
     source: [],
     analysis: [],
+    lecture: [],
   };
   for (const page of pages) {
     if (grouped[page.type]) grouped[page.type].push(page);
@@ -574,6 +583,52 @@ export function listRawSources(wikiDir: string): RawSourceMeta[] {
   }
 
   return sources;
+}
+
+/**
+ * Save a raw PDF source document to `raw/pdfs/{filename}`. Raw PDFs are
+ * immutable once written — callers should never re-save or mutate them.
+ * Returns the relative posix-style filepath.
+ */
+export function savePDFSource(
+  wikiDir: string,
+  filename: string,
+  buffer: Buffer
+): string {
+  const pdfDir = path.join(wikiDir, "raw", "pdfs");
+  if (!fs.existsSync(pdfDir)) {
+    fs.mkdirSync(pdfDir, { recursive: true });
+  }
+
+  const relFilepath = toPosix(path.join("raw", "pdfs", filename));
+  fs.writeFileSync(path.join(wikiDir, relFilepath), buffer);
+  return relFilepath;
+}
+
+/**
+ * List all raw PDF sources under `raw/pdfs/`.
+ * Filters to `.pdf` extension (case-insensitive) and returns posix filepaths.
+ */
+export function listPDFSources(
+  wikiDir: string
+): Array<{ filename: string; filepath: string }> {
+  const pdfDir = path.join(wikiDir, "raw", "pdfs");
+  if (!fs.existsSync(pdfDir)) return [];
+
+  const pdfs: Array<{ filename: string; filepath: string }> = [];
+  const entries = fs.readdirSync(pdfDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    if (!entry.name.toLowerCase().endsWith(".pdf")) continue;
+
+    pdfs.push({
+      filename: entry.name,
+      filepath: toPosix(path.join("raw", "pdfs", entry.name)),
+    });
+  }
+
+  return pdfs;
 }
 
 // ─── Token usage tracking ──────────────────────────────────────────────
