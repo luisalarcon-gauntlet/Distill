@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getBrain } from "@/lib/config";
-import { execSync } from "child_process";
+import { spawnSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -19,12 +19,16 @@ export async function GET(
     const archiveName = `${brain.id}.tar.gz`;
     const archivePath = path.join(tmpDir, archiveName);
 
-    // Create tar.gz of the brain directory
+    // Create tar.gz of the brain directory — use spawnSync with args array
+    // to avoid shell interpolation of user-derived paths.
     const brainParent = path.dirname(brain.path);
     const brainFolder = path.basename(brain.path);
-    execSync(`tar -czf "${archivePath}" -C "${brainParent}" "${brainFolder}"`, {
+    const result = spawnSync("tar", ["-czf", archivePath, "-C", brainParent, brainFolder], {
       stdio: "ignore",
     });
+    if (result.status !== 0) {
+      throw new Error(`tar exited with status ${result.status}`);
+    }
 
     const fileBuffer = fs.readFileSync(archivePath);
 
