@@ -452,6 +452,9 @@ export default function WikiApp() {
   const [newFolderMode, setNewFolderMode] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [newFolderError, setNewFolderError] = useState("");
+  const [researchEnabled, setResearchEnabled] = useState(false);
+  const [pdfEnabled, setPdfEnabled] = useState(false);
+  const [pdfDragOver, setPdfDragOver] = useState(false);
 
   // Review state (step 2 of brain creation)
   const [pendingBrain, setPendingBrain] = useState<BrainConfig | null>(null);
@@ -1115,7 +1118,29 @@ export default function WikiApp() {
         ? `${createDir}/${slugify(createName)}/`
         : null;
 
-    const canCreate = createName.trim() && createTopic.trim() && createDir;
+    const hasName = createName.trim().length > 0;
+    const hasSource = researchEnabled || pdfEnabled;
+    const researchReady = researchEnabled ? createTopic.trim().length > 0 : true;
+    const pdfReady = pdfEnabled ? uploadFiles.length > 0 : true;
+    const canCreate = Boolean(
+      hasName && createDir && hasSource && researchReady && pdfReady,
+    );
+
+    let buttonLabel = "Create brain \u2192";
+    if (!hasName) buttonLabel = "Enter a brain name";
+    else if (!hasSource) buttonLabel = "Select at least one source";
+    else if (researchEnabled && !createTopic.trim()) buttonLabel = "Enter a research topic";
+    else if (pdfEnabled && uploadFiles.length === 0) buttonLabel = "Upload PDF files";
+
+    const totalUploadSize = uploadFiles.reduce((sum, f) => sum + f.size, 0);
+
+    const compositionParts: string[] = [];
+    if (researchEnabled) compositionParts.push("research papers");
+    if (pdfEnabled) {
+      compositionParts.push(
+        `${uploadFiles.length} PDF${uploadFiles.length === 1 ? "" : "s"}`,
+      );
+    }
 
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
@@ -1143,7 +1168,7 @@ export default function WikiApp() {
             className="font-semibold mb-8"
             style={{ fontFamily: "IBM Plex Mono", fontSize: 24, color: "#e0dfe6" }}
           >
-            Create a New Brain
+            Create a new brain
           </h1>
 
           {error && (
@@ -1181,74 +1206,6 @@ export default function WikiApp() {
                 borderRadius: 8,
               }}
             />
-          </div>
-
-          {/* Research Topic */}
-          <div className="mb-5">
-            <label
-              className="block mb-1.5 uppercase tracking-widest"
-              style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#7a7a8c" }}
-            >
-              Research Topic
-            </label>
-            <input
-              value={createTopic}
-              onChange={(e) => setCreateTopic(e.target.value)}
-              placeholder="e.g. transformer architecture"
-              className="w-full outline-none"
-              style={{
-                padding: "10px 14px",
-                fontSize: 14,
-                color: "#e0dfe6",
-                background: "#12121a",
-                border: "1px solid #1e1e2e",
-                borderRadius: 8,
-              }}
-            />
-          </div>
-
-          {/* Initial Sources */}
-          <div className="mb-5">
-            <label
-              className="block mb-1.5 uppercase tracking-widest"
-              style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#7a7a8c" }}
-            >
-              Initial sources
-            </label>
-            <div className="flex items-center gap-2">
-              {[10, 20, 30, 50].map((n) => {
-                const selected = sourceCount === n;
-                return (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setSourceCount(n)}
-                    className="px-4 py-2 rounded-lg"
-                    style={{
-                      fontFamily: "IBM Plex Mono",
-                      fontSize: 13,
-                      color: selected ? "#7ec99a" : "#c4a1ff",
-                      background: selected
-                        ? "rgba(126,201,154,0.1)"
-                        : "#12121a",
-                      border: selected
-                        ? "1px solid rgba(126,201,154,0.4)"
-                        : "1px solid #1e1e2e",
-                      cursor: "pointer",
-                      minWidth: 56,
-                    }}
-                  >
-                    {n}
-                  </button>
-                );
-              })}
-            </div>
-            <div
-              className="mt-1.5"
-              style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#7a7a8c" }}
-            >
-              More sources = richer wiki, but longer compile time and higher token cost
-            </div>
           </div>
 
           {/* Directory Picker */}
@@ -1439,60 +1396,21 @@ export default function WikiApp() {
             </div>
           )}
 
-          {/* Flow note */}
+          {/* SOURCES label */}
           <div
-            className="mb-6 px-3 py-2 rounded-lg"
-            style={{
-              background: "rgba(196,161,255,0.04)",
-              border: "1px solid rgba(196,161,255,0.08)",
-              fontSize: 12,
-              color: "#7a7a8c",
-              lineHeight: 1.6,
-            }}
-          >
-            Next: we&rsquo;ll search Semantic Scholar, arXiv, and OpenAlex for papers
-            about your topic so you can review and curate them before compiling.
-          </div>
-
-          {/* Create button */}
-          <button
-            onClick={uploadFiles.length > 0 ? handleUploadCreate : handleCreate}
-            disabled={!canCreate}
-            className="w-full py-3 rounded-lg font-medium"
             style={{
               fontFamily: "IBM Plex Mono",
-              fontSize: 14,
-              color: canCreate ? "#0a0a0f" : "#4a4a5c",
-              background: canCreate ? "#c4a1ff" : "#1e1e2e",
-              border: "none",
-              cursor: canCreate ? "pointer" : "not-allowed",
+              fontSize: 10,
+              textTransform: "uppercase",
+              letterSpacing: "0.15em",
+              color: "#5a5a6c",
+              margin: "24px 0 12px",
             }}
           >
-            {uploadFiles.length > 0
-              ? "Create brain from files \u2192"
-              : "Search for Papers \u2192"}
-          </button>
-
-          {/* Divider: "or" */}
-          <div
-            className="flex items-center"
-            style={{ margin: "18px 0" }}
-          >
-            <div style={{ flex: 1, height: 1, background: "#1e1e2e" }} />
-            <span
-              style={{
-                fontFamily: "IBM Plex Mono",
-                color: "#4a4a5c",
-                fontSize: 11,
-                padding: "0 12px",
-              }}
-            >
-              or
-            </span>
-            <div style={{ flex: 1, height: 1, background: "#1e1e2e" }} />
+            Sources
           </div>
 
-          {/* Hidden file input */}
+          {/* Hidden file input (shared) */}
           <input
             ref={uploadInputRef}
             type="file"
@@ -1501,160 +1419,482 @@ export default function WikiApp() {
             style={{ display: "none" }}
             onChange={(e) => {
               const files = e.target.files ? Array.from(e.target.files) : [];
-              if (files.length > 0) {
-                setUploadFiles((prev) => [...prev, ...files]);
+              const pdfs = files.filter(
+                (f) =>
+                  f.type === "application/pdf" ||
+                  f.name.toLowerCase().endsWith(".pdf"),
+              );
+              if (pdfs.length > 0) {
+                setUploadFiles((prev) => [...prev, ...pdfs]);
               }
               e.target.value = "";
             }}
           />
 
-          {/* Upload button */}
-          <button
-            onClick={() => uploadInputRef.current?.click()}
-            className="w-full py-3 rounded-lg"
-            style={{
-              fontFamily: '"IBM Plex Mono", monospace',
-              fontSize: 14,
-              color: "#c4a1ff",
-              background: "rgba(196,161,255,0.06)",
-              border: "1px solid rgba(196,161,255,0.15)",
-              borderRadius: 8,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-            }}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#c4a1ff"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-            <span>Upload my own files</span>
-            <span
-              style={{
-                fontSize: 9,
-                textTransform: "uppercase",
-                letterSpacing: "0.5px",
-                padding: "2px 6px",
-                borderRadius: 4,
-                background: "rgba(126,201,154,0.12)",
-                color: "#7ec99a",
-              }}
-            >
-              Beta
-            </span>
-          </button>
-
-          {/* Subtitle */}
+          {/* Research papers card */}
           <div
+            onClick={() => setResearchEnabled((v) => !v)}
             style={{
-              color: "#5a5a6c",
-              fontSize: 11,
-              textAlign: "center",
-              marginTop: 8,
-              fontFamily: "IBM Plex Mono",
+              background: researchEnabled
+                ? "rgba(196,161,255,0.06)"
+                : "#0e0e16",
+              border: researchEnabled
+                ? "1px solid rgba(196,161,255,0.3)"
+                : "1px solid #1a1a28",
+              borderRadius: 10,
+              padding: 14,
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+              marginBottom: 10,
             }}
           >
-            Upload PDFs from a course, textbook, or any document collection
-          </div>
-
-          {/* Selected files panel */}
-          {uploadFiles.length > 0 && (
-            <div
-              style={{
-                background: "rgba(196,161,255,0.04)",
-                border: "1px solid rgba(196,161,255,0.12)",
-                borderRadius: 8,
-                padding: 12,
-                marginTop: 12,
-              }}
-            >
-              <div className="flex flex-col" style={{ gap: 6 }}>
-                {uploadFiles.map((f, i) => (
-                  <div
-                    key={`${f.name}-${i}`}
-                    className="flex items-center"
-                    style={{ gap: 8 }}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center" style={{ gap: 12 }}>
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: researchEnabled
+                      ? "rgba(196,161,255,0.12)"
+                      : "#1a1a28",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke={researchEnabled ? "#c4a1ff" : "#5a5a6c"}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
                   >
-                    <span
-                      className="truncate flex-1"
-                      style={{
-                        fontFamily: "IBM Plex Mono",
-                        fontSize: 12,
-                        color: "#c4a1ff",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                      title={f.name}
-                    >
-                      {f.name}
-                    </span>
-                    <span
-                      style={{
-                        fontFamily: "IBM Plex Mono",
-                        fontSize: 11,
-                        color: "#5a5a6c",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {formatFileSize(f.size)}
-                    </span>
-                    <button
-                      onClick={() =>
-                        setUploadFiles((prev) => prev.filter((_, j) => j !== i))
-                      }
-                      style={{
-                        fontFamily: "IBM Plex Mono",
-                        fontSize: 14,
-                        color: "#5a5a6c",
-                        background: "transparent",
-                        border: "none",
-                        cursor: "pointer",
-                        padding: "0 4px",
-                        lineHeight: 1,
-                        flexShrink: 0,
-                      }}
-                      onMouseOver={(e) =>
-                        (e.currentTarget.style.color = "#c4a1ff")
-                      }
-                      onMouseOut={(e) =>
-                        (e.currentTarget.style.color = "#5a5a6c")
-                      }
-                      aria-label={`Remove ${f.name}`}
-                    >
-                      &times;
-                    </button>
-                  </div>
-                ))}
+                    <circle cx="11" cy="11" r="7" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                </div>
+                <div className="flex flex-col">
+                  <span
+                    style={{
+                      fontFamily: "IBM Plex Mono",
+                      fontSize: 14,
+                      color: researchEnabled ? "#e0dfe6" : "#7a7a8c",
+                    }}
+                  >
+                    Research papers
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "IBM Plex Mono",
+                      fontSize: 11,
+                      color: researchEnabled ? "#7a7a8c" : "#5a5a6c",
+                    }}
+                  >
+                    Search Semantic Scholar, arXiv, OpenAlex
+                  </span>
+                </div>
               </div>
               <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setResearchEnabled((v) => !v);
+                }}
                 style={{
-                  borderTop: "1px solid rgba(196,161,255,0.12)",
-                  marginTop: 10,
-                  paddingTop: 8,
-                  fontFamily: "IBM Plex Mono",
-                  fontSize: 11,
-                  color: "#7a7a8c",
+                  position: "relative",
+                  width: 32,
+                  height: 18,
+                  borderRadius: 999,
+                  background: researchEnabled ? "#8b6fc0" : "#2a2a3c",
+                  transition: "all 0.2s ease",
+                  flexShrink: 0,
                 }}
               >
-                {uploadFiles.length} file{uploadFiles.length === 1 ? "" : "s"} selected (
-                {formatFileSize(
-                  uploadFiles.reduce((sum, f) => sum + f.size, 0),
-                )}
-                )
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 2,
+                    left: researchEnabled ? 16 : 2,
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#ffffff",
+                    transition: "all 0.2s ease",
+                  }}
+                />
               </div>
+            </div>
+
+            {researchEnabled && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{ marginTop: 12 }}
+              >
+                <input
+                  value={createTopic}
+                  onChange={(e) => setCreateTopic(e.target.value)}
+                  placeholder="e.g. transformer architecture"
+                  className="w-full outline-none"
+                  style={{
+                    padding: "10px 14px",
+                    fontSize: 14,
+                    color: "#e0dfe6",
+                    background: "#12121a",
+                    border: "1px solid #1e1e2e",
+                    borderRadius: 8,
+                  }}
+                />
+                <div
+                  className="flex items-center gap-2"
+                  style={{ marginTop: 10 }}
+                >
+                  {[10, 20, 30, 50].map((n) => {
+                    const selected = sourceCount === n;
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setSourceCount(n)}
+                        className="px-4 py-2 rounded-lg"
+                        style={{
+                          fontFamily: "IBM Plex Mono",
+                          fontSize: 13,
+                          color: selected ? "#7ec99a" : "#c4a1ff",
+                          background: selected
+                            ? "rgba(126,201,154,0.1)"
+                            : "#12121a",
+                          border: selected
+                            ? "1px solid rgba(126,201,154,0.4)"
+                            : "1px solid #1e1e2e",
+                          cursor: "pointer",
+                          minWidth: 56,
+                        }}
+                      >
+                        {n}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div
+                  style={{
+                    marginTop: 10,
+                    fontFamily: "IBM Plex Mono",
+                    fontSize: 11,
+                    color: "#5a5a6c",
+                  }}
+                >
+                  We&rsquo;ll search for papers and let you review before compiling
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Upload PDFs card */}
+          <div
+            onClick={() => setPdfEnabled((v) => !v)}
+            style={{
+              background: pdfEnabled
+                ? "rgba(126,201,154,0.06)"
+                : "#0e0e16",
+              border: pdfEnabled
+                ? "1px solid rgba(126,201,154,0.3)"
+                : "1px solid #1a1a28",
+              borderRadius: 10,
+              padding: 14,
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+              marginBottom: 10,
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center" style={{ gap: 12 }}>
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: pdfEnabled
+                      ? "rgba(126,201,154,0.12)"
+                      : "#1a1a28",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke={pdfEnabled ? "#7ec99a" : "#5a5a6c"}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                </div>
+                <div className="flex flex-col">
+                  <span
+                    className="flex items-center"
+                    style={{
+                      fontFamily: "IBM Plex Mono",
+                      fontSize: 14,
+                      color: pdfEnabled ? "#e0dfe6" : "#7a7a8c",
+                    }}
+                  >
+                    Upload PDFs
+                    <span
+                      style={{
+                        background: "rgba(126,201,154,0.12)",
+                        color: "#7ec99a",
+                        fontSize: 9,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.5px",
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                        marginLeft: 8,
+                      }}
+                    >
+                      Beta
+                    </span>
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "IBM Plex Mono",
+                      fontSize: 11,
+                      color: pdfEnabled ? "#7a7a8c" : "#5a5a6c",
+                    }}
+                  >
+                    Course materials, textbooks, any documents
+                  </span>
+                </div>
+              </div>
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPdfEnabled((v) => !v);
+                }}
+                style={{
+                  position: "relative",
+                  width: 32,
+                  height: 18,
+                  borderRadius: 999,
+                  background: pdfEnabled ? "#5dba84" : "#2a2a3c",
+                  transition: "all 0.2s ease",
+                  flexShrink: 0,
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 2,
+                    left: pdfEnabled ? 16 : 2,
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#ffffff",
+                    transition: "all 0.2s ease",
+                  }}
+                />
+              </div>
+            </div>
+
+            {pdfEnabled && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{ marginTop: 12 }}
+              >
+                <div
+                  onClick={() => uploadInputRef.current?.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setPdfDragOver(true);
+                  }}
+                  onDragLeave={() => setPdfDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setPdfDragOver(false);
+                    const dropped = Array.from(e.dataTransfer.files).filter(
+                      (f) =>
+                        f.type === "application/pdf" ||
+                        f.name.toLowerCase().endsWith(".pdf"),
+                    );
+                    if (dropped.length > 0) {
+                      setUploadFiles((prev) => [...prev, ...dropped]);
+                    }
+                  }}
+                  style={{
+                    border: pdfDragOver
+                      ? "1.5px solid rgba(126,201,154,0.6)"
+                      : "1.5px dashed rgba(126,201,154,0.3)",
+                    borderRadius: 8,
+                    padding: 16,
+                    textAlign: "center",
+                    cursor: "pointer",
+                    background: pdfDragOver
+                      ? "rgba(126,201,154,0.08)"
+                      : "transparent",
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: "IBM Plex Mono",
+                      fontSize: 13,
+                      color: "#e0dfe6",
+                    }}
+                  >
+                    Drop PDFs here
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "IBM Plex Mono",
+                      fontSize: 11,
+                      color: "#5a5a6c",
+                      marginTop: 4,
+                    }}
+                  >
+                    or click to browse
+                  </div>
+                </div>
+
+                {uploadFiles.length > 0 && (
+                  <div
+                    style={{
+                      background: "rgba(196,161,255,0.04)",
+                      border: "1px solid rgba(196,161,255,0.12)",
+                      borderRadius: 8,
+                      padding: 12,
+                      marginTop: 12,
+                    }}
+                  >
+                    <div className="flex flex-col" style={{ gap: 6 }}>
+                      {uploadFiles.map((f, i) => (
+                        <div
+                          key={`${f.name}-${i}`}
+                          className="flex items-center"
+                          style={{ gap: 8 }}
+                        >
+                          <span
+                            className="truncate flex-1"
+                            style={{
+                              fontFamily: "IBM Plex Mono",
+                              fontSize: 12,
+                              color: "#e0dfe6",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                            title={f.name}
+                          >
+                            {f.name}
+                          </span>
+                          <span
+                            style={{
+                              fontFamily: "IBM Plex Mono",
+                              fontSize: 11,
+                              color: "#5a5a6c",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {formatFileSize(f.size)}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setUploadFiles((prev) =>
+                                prev.filter((_, j) => j !== i),
+                              );
+                            }}
+                            style={{
+                              fontFamily: "IBM Plex Mono",
+                              fontSize: 14,
+                              color: "#5a5a6c",
+                              background: "transparent",
+                              border: "none",
+                              cursor: "pointer",
+                              padding: "0 4px",
+                              lineHeight: 1,
+                              flexShrink: 0,
+                            }}
+                            onMouseOver={(e) =>
+                              (e.currentTarget.style.color = "#d46a6a")
+                            }
+                            onMouseOut={(e) =>
+                              (e.currentTarget.style.color = "#5a5a6c")
+                            }
+                            aria-label={`Remove ${f.name}`}
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div
+                      style={{
+                        borderTop: "1px solid rgba(126,201,154,0.15)",
+                        marginTop: 10,
+                        paddingTop: 8,
+                        fontFamily: "IBM Plex Mono",
+                        fontSize: 11,
+                        color: "#7ec99a",
+                      }}
+                    >
+                      {uploadFiles.length} file
+                      {uploadFiles.length === 1 ? "" : "s"} selected (
+                      {formatFileSize(totalUploadSize)})
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Create button */}
+          <button
+            onClick={() => {
+              if (!canCreate) return;
+              if (pdfEnabled && !researchEnabled) {
+                handleUploadCreate();
+              } else {
+                handleCreate();
+              }
+            }}
+            disabled={!canCreate}
+            className="w-full rounded-lg font-medium"
+            style={{
+              marginTop: 20,
+              padding: "12px",
+              fontFamily: "IBM Plex Mono",
+              fontSize: 14,
+              color: canCreate ? "#0a0a0f" : "#4a4a5c",
+              background: canCreate ? "#c4a1ff" : "#1e1e2e",
+              border: "none",
+              cursor: canCreate ? "pointer" : "not-allowed",
+            }}
+          >
+            {buttonLabel}
+          </button>
+
+          {canCreate && compositionParts.length > 0 && (
+            <div
+              style={{
+                marginTop: 8,
+                fontFamily: "IBM Plex Mono",
+                fontSize: 11,
+                color: "#5a5a6c",
+                textAlign: "center",
+              }}
+            >
+              Sources: {compositionParts.join(" + ")}
             </div>
           )}
         </div>
