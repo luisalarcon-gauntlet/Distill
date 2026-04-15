@@ -21,6 +21,7 @@ import {
   type PDFClassification,
   type CurriculumStructure,
 } from "@/lib/compiler";
+import { searchAllSources } from "@/lib/papers";
 
 /**
  * Create a curriculum brain from a batch of uploaded PDFs.
@@ -49,16 +50,16 @@ export async function POST(request: Request) {
     const directory = formData.get("directory");
     const files = formData.getAll("files");
 
+    const topicStr = typeof topic === "string" ? topic.trim() : "";
+
     if (
       typeof name !== "string" ||
       !name ||
-      typeof topic !== "string" ||
-      !topic ||
       typeof directory !== "string" ||
       !directory
     ) {
       return NextResponse.json(
-        { error: "name, topic, and directory are required" },
+        { error: "name and directory are required" },
         { status: 400 }
       );
     }
@@ -82,14 +83,14 @@ export async function POST(request: Request) {
       .replace(/^-|-$/g, "");
     brainPath = path.join(directory, slug);
 
-    initWikiDir(brainPath, topic);
+    initWikiDir(brainPath, topicStr);
 
     const now = new Date().toISOString();
     const brain: BrainConfig = {
       id,
       name,
       path: brainPath,
-      topic,
+      topic: topicStr,
       created: now,
       lastOpened: now,
     };
@@ -210,6 +211,15 @@ export async function POST(request: Request) {
             "syllabus",
             `Parsed syllabus from ${syllabusFile.filename}: ${courseInfo.courseName}`
           );
+          if (courseInfo.courseName && (!brain.topic || brain.topic === "")) {
+            brain.topic = courseInfo.courseName;
+            registerBrain(brain);
+            appendLog(
+              brainPath,
+              "syllabus",
+              `Auto-populated brain topic from syllabus: ${courseInfo.courseName}`
+            );
+          }
         } catch (err: any) {
           appendLog(
             brainPath,
@@ -293,7 +303,7 @@ export async function POST(request: Request) {
       }
     }
 
-    rebuildIndex(brainPath, topic);
+    rebuildIndex(brainPath, brain.topic);
     appendLog(
       brainPath,
       "upload",
@@ -306,6 +316,25 @@ export async function POST(request: Request) {
       classifiedCounts[c.type] = (classifiedCounts[c.type] || 0) + 1;
     }
 
+    // ── Search papers if the user provided an explicit topic ──────────────
+    let papers: Awaited<ReturnType<typeof searchAllSources>> = [];
+    if (topicStr) {
+      try {
+        papers = await searchAllSources(topicStr, 10);
+        appendLog(
+          brainPath,
+          "search",
+          `Found ${papers.length} papers for topic "${topicStr}"`
+        );
+      } catch (err: any) {
+        appendLog(
+          brainPath,
+          "warn",
+          `searchAllSources failed: ${err?.message || String(err)}`
+        );
+      }
+    }
+
     return NextResponse.json({
       brain,
       pipeline: {
@@ -315,6 +344,7 @@ export async function POST(request: Request) {
         classified: classifiedCounts,
         pagesGenerated,
       },
+      papers,
     });
   } catch (error: any) {
     console.error("Upload brain error:", error);
