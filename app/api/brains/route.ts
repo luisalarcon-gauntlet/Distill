@@ -30,7 +30,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, topic, directory } = body;
+    const { name, topic, directory, sourceCount } = body;
 
     if (!name || !topic || !directory) {
       return NextResponse.json(
@@ -38,6 +38,11 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+
+    const limit =
+      typeof sourceCount === "number" && sourceCount > 0
+        ? Math.floor(sourceCount)
+        : 20;
 
     const id = generateBrainId(name);
     const slug = name
@@ -50,11 +55,11 @@ export async function POST(request: Request) {
     initWikiDir(brainPath, topic);
 
     // Search for papers across all three sources. No wiki generation yet.
-    const papers = await searchAllSources(topic, 10);
+    const papers = await searchAllSources(topic, limit);
     appendLog(
       brainPath,
       "search",
-      `Found ${papers.length} papers across Semantic Scholar, arXiv, OpenAlex`
+      `Found ${papers.length} papers across Semantic Scholar, arXiv, OpenAlex (requested ${limit})`
     );
 
     const now = new Date().toISOString();

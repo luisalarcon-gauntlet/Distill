@@ -389,11 +389,13 @@ function deduplicate(papers: Paper[]): Paper[] {
  * Returns an empty array (and logs) if all three fail.
  */
 export async function searchAllSources(query: string, limit: number = 10): Promise<Paper[]> {
-  // Ask each backend for `limit` so we have headroom after dedup.
+  // Each backend gets ~75% of `limit` individually — dedup across
+  // sources removes some, and the merged pool is sliced back to `limit`.
+  const perSource = Math.max(1, Math.ceil(limit * 0.75));
   const results = await Promise.allSettled([
-    searchPapers(query, limit),
-    searchArxiv(query, limit),
-    searchOpenAlex(query, limit),
+    searchPapers(query, perSource),
+    searchArxiv(query, perSource),
+    searchOpenAlex(query, perSource),
   ]);
 
   const labels = ["Semantic Scholar", "arXiv", "OpenAlex"] as const;

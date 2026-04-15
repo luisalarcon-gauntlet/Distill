@@ -431,6 +431,7 @@ export default function WikiApp() {
   const [createName, setCreateName] = useState("");
   const [createTopic, setCreateTopic] = useState("");
   const [createDir, setCreateDir] = useState("");
+  const [sourceCount, setSourceCount] = useState<number>(20);
   const [browseDirs, setBrowseDirs] = useState<{ name: string; path: string }[]>([]);
   const [browseParent, setBrowseParent] = useState<string | null>(null);
   const [browseCurrent, setBrowseCurrent] = useState("");
@@ -559,6 +560,7 @@ export default function WikiApp() {
           name: createName,
           topic: createTopic,
           directory: createDir,
+          sourceCount,
         }),
       });
       const data = await res.json();
@@ -575,7 +577,7 @@ export default function WikiApp() {
       setError(e.message);
       setScreen("create");
     }
-  }, [createName, createTopic, createDir, loadBrain]);
+  }, [createName, createTopic, createDir, sourceCount, loadBrain]);
 
   const toggleSelectedPaper = useCallback((paperId: string) => {
     setSelectedPaperIds((prev) => {
@@ -1050,6 +1052,50 @@ export default function WikiApp() {
                 borderRadius: 8,
               }}
             />
+          </div>
+
+          {/* Initial Sources */}
+          <div className="mb-5">
+            <label
+              className="block mb-1.5 uppercase tracking-widest"
+              style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#7a7a8c" }}
+            >
+              Initial sources
+            </label>
+            <div className="flex items-center gap-2">
+              {[10, 20, 30, 50].map((n) => {
+                const selected = sourceCount === n;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setSourceCount(n)}
+                    className="px-4 py-2 rounded-lg"
+                    style={{
+                      fontFamily: "IBM Plex Mono",
+                      fontSize: 13,
+                      color: selected ? "#7ec99a" : "#c4a1ff",
+                      background: selected
+                        ? "rgba(126,201,154,0.1)"
+                        : "#12121a",
+                      border: selected
+                        ? "1px solid rgba(126,201,154,0.4)"
+                        : "1px solid #1e1e2e",
+                      cursor: "pointer",
+                      minWidth: 56,
+                    }}
+                  >
+                    {n}
+                  </button>
+                );
+              })}
+            </div>
+            <div
+              className="mt-1.5"
+              style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#7a7a8c" }}
+            >
+              More sources = richer wiki, but longer compile time and higher token cost
+            </div>
           </div>
 
           {/* Directory Picker */}
