@@ -463,6 +463,10 @@ export default function WikiApp() {
   const [linting, setLinting] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
 
+  // Upload-your-own-files flow (alternative to paper search on create screen)
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+
   // Token usage stats for the active brain
   const [tokenSummary, setTokenSummary] = useState<TokenSummary | null>(null);
   const [tokenStatsOpen, setTokenStatsOpen] = useState(false);
@@ -578,6 +582,37 @@ export default function WikiApp() {
       setScreen("create");
     }
   }, [createName, createTopic, createDir, sourceCount, loadBrain]);
+
+  const handleUploadCreate = useCallback(async () => {
+    if (uploadFiles.length === 0) return;
+    if (!createName.trim() || !createDir) return;
+    setScreen("loading");
+    setLoadingMessage("Creating brain from uploaded files...");
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("name", createName);
+      formData.append("topic", createTopic);
+      formData.append("directory", createDir);
+      for (const file of uploadFiles) formData.append("files", file);
+      const res = await fetch("/api/brains/upload", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Upload failed" }));
+        throw new Error(err.error || "Upload failed");
+      }
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      await loadBrains();
+      setUploadFiles([]);
+      await loadBrain(data.brain.id);
+    } catch (e: any) {
+      setError(e.message || "Upload failed");
+      setScreen("create");
+    }
+  }, [uploadFiles, createName, createTopic, createDir, loadBrain]);
 
   const toggleSelectedPaper = useCallback((paperId: string) => {
     setSelectedPaperIds((prev) => {
@@ -820,6 +855,11 @@ export default function WikiApp() {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
+
+  const formatFileSize = (bytes: number) =>
+    bytes < 1024 * 1024
+      ? (bytes / 1024).toFixed(1) + " KB"
+      : (bytes / (1024 * 1024)).toFixed(1) + " MB";
 
   // ─── BRAIN SELECTOR ───
   if (screen === "brains") {
@@ -1303,7 +1343,7 @@ export default function WikiApp() {
 
           {/* Create button */}
           <button
-            onClick={handleCreate}
+            onClick={uploadFiles.length > 0 ? handleUploadCreate : handleCreate}
             disabled={!canCreate}
             className="w-full py-3 rounded-lg font-medium"
             style={{
@@ -1315,8 +1355,195 @@ export default function WikiApp() {
               cursor: canCreate ? "pointer" : "not-allowed",
             }}
           >
-            Search for Papers &rarr;
+            {uploadFiles.length > 0
+              ? "Create brain from files \u2192"
+              : "Search for Papers \u2192"}
           </button>
+
+          {/* Divider: "or" */}
+          <div
+            className="flex items-center"
+            style={{ margin: "18px 0" }}
+          >
+            <div style={{ flex: 1, height: 1, background: "#1e1e2e" }} />
+            <span
+              style={{
+                fontFamily: "IBM Plex Mono",
+                color: "#4a4a5c",
+                fontSize: 11,
+                padding: "0 12px",
+              }}
+            >
+              or
+            </span>
+            <div style={{ flex: 1, height: 1, background: "#1e1e2e" }} />
+          </div>
+
+          {/* Hidden file input */}
+          <input
+            ref={uploadInputRef}
+            type="file"
+            accept=".pdf"
+            multiple
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const files = e.target.files ? Array.from(e.target.files) : [];
+              if (files.length > 0) {
+                setUploadFiles((prev) => [...prev, ...files]);
+              }
+              e.target.value = "";
+            }}
+          />
+
+          {/* Upload button */}
+          <button
+            onClick={() => uploadInputRef.current?.click()}
+            className="w-full py-3 rounded-lg"
+            style={{
+              fontFamily: '"IBM Plex Mono", monospace',
+              fontSize: 14,
+              color: "#c4a1ff",
+              background: "rgba(196,161,255,0.06)",
+              border: "1px solid rgba(196,161,255,0.15)",
+              borderRadius: 8,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+            }}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#c4a1ff"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <span>Upload my own files</span>
+            <span
+              style={{
+                fontSize: 9,
+                textTransform: "uppercase",
+                letterSpacing: "0.5px",
+                padding: "2px 6px",
+                borderRadius: 4,
+                background: "rgba(126,201,154,0.12)",
+                color: "#7ec99a",
+              }}
+            >
+              Beta
+            </span>
+          </button>
+
+          {/* Subtitle */}
+          <div
+            style={{
+              color: "#5a5a6c",
+              fontSize: 11,
+              textAlign: "center",
+              marginTop: 8,
+              fontFamily: "IBM Plex Mono",
+            }}
+          >
+            Upload PDFs from a course, textbook, or any document collection
+          </div>
+
+          {/* Selected files panel */}
+          {uploadFiles.length > 0 && (
+            <div
+              style={{
+                background: "rgba(196,161,255,0.04)",
+                border: "1px solid rgba(196,161,255,0.12)",
+                borderRadius: 8,
+                padding: 12,
+                marginTop: 12,
+              }}
+            >
+              <div className="flex flex-col" style={{ gap: 6 }}>
+                {uploadFiles.map((f, i) => (
+                  <div
+                    key={`${f.name}-${i}`}
+                    className="flex items-center"
+                    style={{ gap: 8 }}
+                  >
+                    <span
+                      className="truncate flex-1"
+                      style={{
+                        fontFamily: "IBM Plex Mono",
+                        fontSize: 12,
+                        color: "#c4a1ff",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={f.name}
+                    >
+                      {f.name}
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: "IBM Plex Mono",
+                        fontSize: 11,
+                        color: "#5a5a6c",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {formatFileSize(f.size)}
+                    </span>
+                    <button
+                      onClick={() =>
+                        setUploadFiles((prev) => prev.filter((_, j) => j !== i))
+                      }
+                      style={{
+                        fontFamily: "IBM Plex Mono",
+                        fontSize: 14,
+                        color: "#5a5a6c",
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: "0 4px",
+                        lineHeight: 1,
+                        flexShrink: 0,
+                      }}
+                      onMouseOver={(e) =>
+                        (e.currentTarget.style.color = "#c4a1ff")
+                      }
+                      onMouseOut={(e) =>
+                        (e.currentTarget.style.color = "#5a5a6c")
+                      }
+                      aria-label={`Remove ${f.name}`}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div
+                style={{
+                  borderTop: "1px solid rgba(196,161,255,0.12)",
+                  marginTop: 10,
+                  paddingTop: 8,
+                  fontFamily: "IBM Plex Mono",
+                  fontSize: 11,
+                  color: "#7a7a8c",
+                }}
+              >
+                {uploadFiles.length} file{uploadFiles.length === 1 ? "" : "s"} selected (
+                {formatFileSize(
+                  uploadFiles.reduce((sum, f) => sum + f.size, 0),
+                )}
+                )
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
