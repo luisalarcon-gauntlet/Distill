@@ -458,6 +458,7 @@ export default function WikiApp() {
 
   // Review state (step 2 of brain creation)
   const [pendingBrain, setPendingBrain] = useState<BrainConfig | null>(null);
+  const [hybridMode, setHybridMode] = useState(false);
   const [candidatePapers, setCandidatePapers] = useState<Paper[]>([]);
   const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(new Set());
   const [expandedAbstracts, setExpandedAbstracts] = useState<Set<string>>(new Set());
@@ -587,9 +588,16 @@ export default function WikiApp() {
   }, [newFolderName, browseCurrent, browseTo]);
 
   const handleCreate = useCallback(async () => {
-    if (!createName.trim() || !createTopic.trim() || !createDir) return;
+    if (!createName.trim() || !createDir) return;
+    const topicToSend = researchEnabled ? createTopic.trim() : "";
+    if (researchEnabled && !topicToSend) return;
+    setHybridMode(false);
     setScreen("loading");
-    setLoadingMessage(`Searching Semantic Scholar, arXiv, OpenAlex for "${createTopic}"...`);
+    setLoadingMessage(
+      topicToSend
+        ? `Searching Semantic Scholar, arXiv, OpenAlex for "${topicToSend}"...`
+        : `Creating brain "${createName}"...`
+    );
     setError(null);
     try {
       const res = await fetch("/api/brains", {
@@ -597,7 +605,7 @@ export default function WikiApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: createName,
-          topic: createTopic,
+          topic: topicToSend,
           directory: createDir,
           sourceCount,
         }),
@@ -616,7 +624,7 @@ export default function WikiApp() {
       setError(e.message);
       setScreen("create");
     }
-  }, [createName, createTopic, createDir, sourceCount, loadBrain]);
+  }, [createName, createTopic, createDir, sourceCount, loadBrain, researchEnabled]);
 
   const clearUploadTimers = useCallback(() => {
     for (const t of uploadTimersRef.current) clearTimeout(t);
@@ -627,6 +635,7 @@ export default function WikiApp() {
     if (uploadFiles.length === 0) return;
     if (!createName.trim() || !createDir) return;
 
+    setHybridMode(false);
     const n = uploadFiles.length;
     const initialSteps: UploadStep[] = UPLOAD_STEP_TEMPLATES.map((fn) => ({
       message: fn(n),
@@ -663,7 +672,6 @@ export default function WikiApp() {
     try {
       const formData = new FormData();
       formData.append("name", createName);
-      formData.append("topic", createTopic);
       formData.append("directory", createDir);
       for (const file of uploadFiles) formData.append("files", file);
       const res = await fetch("/api/brains/upload", {
@@ -701,7 +709,90 @@ export default function WikiApp() {
       clearUploadTimers();
       setUploadError(e.message || "Upload failed");
     }
-  }, [uploadFiles, createName, createTopic, createDir, loadBrain, clearUploadTimers]);
+  }, [uploadFiles, createName, createDir, loadBrain, clearUploadTimers]);
+
+  const handleHybridCreate = useCallback(async () => {
+    if (uploadFiles.length === 0) return;
+    if (!createName.trim() || !createDir || !createTopic.trim()) return;
+
+    setHybridMode(true);
+    const n = uploadFiles.length;
+    const initialSteps: UploadStep[] = UPLOAD_STEP_TEMPLATES.map((fn) => ({
+      message: fn(n),
+      done: false,
+    }));
+    setUploadSteps(initialSteps);
+    setUploadCurrentStep(0);
+    setUploadError(null);
+    setError(null);
+    setScreen("upload-loading");
+
+    clearUploadTimers();
+    const schedule: Array<{ at: number; doneIdx: number; activeIdx: number }> = [
+      { at: 1000, doneIdx: 0, activeIdx: 1 },
+      { at: 3000, doneIdx: 1, activeIdx: 2 },
+      { at: 5000, doneIdx: 2, activeIdx: 3 },
+      { at: 6000, doneIdx: 3, activeIdx: 4 },
+    ];
+    for (const { at, doneIdx, activeIdx } of schedule) {
+      const id = setTimeout(() => {
+        setUploadSteps((prev) => {
+          const next = prev.slice();
+          if (next[doneIdx]) next[doneIdx] = { ...next[doneIdx], done: true };
+          return next;
+        });
+        setUploadCurrentStep(activeIdx);
+      }, at);
+      uploadTimersRef.current.push(id);
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("name", createName);
+      formData.append("topic", createTopic.trim());
+      formData.append("directory", createDir);
+      for (const file of uploadFiles) formData.append("files", file);
+
+      const res = await fetch("/api/brains/upload", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Upload failed" }));
+        throw new Error(err.error || "Upload failed");
+      }
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      clearUploadTimers();
+      setUploadSteps((prev) => prev.map((s) => ({ ...s, done: true })));
+      setUploadCurrentStep(UPLOAD_STEP_TEMPLATES.length - 1);
+
+      await loadBrains();
+      setUploadFiles([]);
+
+      const papers: Paper[] = data.papers || [];
+      if (papers.length > 0) {
+        // Go to review screen for the paper curation step
+        setPendingBrain(data.brain);
+        setCandidatePapers(papers);
+        setSelectedPaperIds(new Set(papers.map((p) => p.id)));
+        setExpandedAbstracts(new Set());
+        setReviewSearchQuery("");
+        // Brief pause on the completed upload-loading screen, then review
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        setScreen("review");
+      } else {
+        // No papers found — go straight to wiki view like PDFs-only
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        await loadBrain(data.brain.id);
+        setHybridMode(false);
+      }
+    } catch (e: any) {
+      clearUploadTimers();
+      setUploadError(e.message || "Upload failed");
+    }
+  }, [uploadFiles, createName, createTopic, createDir, loadBrains, loadBrain, clearUploadTimers]);
 
   const toggleSelectedPaper = useCallback((paperId: string) => {
     setSelectedPaperIds((prev) => {
@@ -758,13 +849,18 @@ export default function WikiApp() {
     const chosen = candidatePapers.filter((p) => selectedPaperIds.has(p.id));
     setScreen("loading");
     setLoadingMessage(
-      chosen.length === 0
-        ? `Creating empty brain "${pendingBrain.name}"...`
-        : `Compiling wiki from ${chosen.length} paper${chosen.length === 1 ? "" : "s"}...`
+      hybridMode
+        ? `Adding ${chosen.length} paper${chosen.length === 1 ? "" : "s"} to wiki...`
+        : chosen.length === 0
+          ? `Creating empty brain "${pendingBrain.name}"...`
+          : `Compiling wiki from ${chosen.length} paper${chosen.length === 1 ? "" : "s"}...`
     );
     setError(null);
     try {
-      const res = await fetch(`/api/brains/${pendingBrain.id}/compile`, {
+      const endpoint = hybridMode
+        ? `/api/brains/${pendingBrain.id}/ingest`
+        : `/api/brains/${pendingBrain.id}/compile`;
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ papers: chosen }),
@@ -772,6 +868,7 @@ export default function WikiApp() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       await loadBrain(pendingBrain.id);
+      setHybridMode(false);
       setPendingBrain(null);
       setCandidatePapers([]);
       setSelectedPaperIds(new Set());
@@ -779,7 +876,7 @@ export default function WikiApp() {
       setError(e.message);
       setScreen("review");
     }
-  }, [pendingBrain, candidatePapers, selectedPaperIds, loadBrain]);
+  }, [pendingBrain, candidatePapers, selectedPaperIds, loadBrain, hybridMode]);
 
   const handleRemoveBrain = useCallback(
     async (e: React.MouseEvent, id: string) => {
@@ -1862,7 +1959,9 @@ export default function WikiApp() {
           <button
             onClick={() => {
               if (!canCreate) return;
-              if (pdfEnabled && !researchEnabled) {
+              if (pdfEnabled && researchEnabled) {
+                handleHybridCreate();
+              } else if (pdfEnabled) {
                 handleUploadCreate();
               } else {
                 handleCreate();
