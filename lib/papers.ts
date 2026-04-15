@@ -22,7 +22,7 @@ export interface Paper {
 }
 
 const S2_BASE = "https://api.semanticscholar.org/graph/v1";
-const ARXIV_BASE = "http://export.arxiv.org/api/query";
+const ARXIV_BASE = "https://export.arxiv.org/api/query";
 const OPENALEX_BASE = "https://api.openalex.org/works";
 const POLITE_UA = "Distill/0.1 (mailto:distill@example.com)";
 
@@ -193,7 +193,15 @@ function decodeEntities(s: string): string {
 }
 
 export async function searchArxiv(query: string, limit: number = 10): Promise<Paper[]> {
-  const url = `${ARXIV_BASE}?search_query=all:${encodeURIComponent(query)}&max_results=${limit}&sortBy=relevance`;
+  // Split query into individual terms and AND them together so arXiv treats
+  // "destructive sound waves" as all:destructive AND all:sound AND all:waves,
+  // not as an implicit OR across all three words.
+  const arxivQuery = query
+    .trim()
+    .split(/\s+/)
+    .map((term) => `all:${term}`)
+    .join("+AND+");
+  const url = `${ARXIV_BASE}?search_query=${arxivQuery}&max_results=${limit}&sortBy=relevance`;
 
   try {
     const res = await fetch(url, {
@@ -265,7 +273,7 @@ function reconstructOpenAlexAbstract(
 }
 
 export async function searchOpenAlex(query: string, limit: number = 10): Promise<Paper[]> {
-  const url = `${OPENALEX_BASE}?search=${encodeURIComponent(query)}&per_page=${limit}&sort=cited_by_count:desc`;
+  const url = `${OPENALEX_BASE}?search=${encodeURIComponent(query)}&per_page=${limit}`;
 
   try {
     const res = await fetch(url, {
@@ -409,6 +417,25 @@ export async function searchAllSources(query: string, limit: number = 10): Promi
   }
 
   const deduped = deduplicate(collected);
-  deduped.sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0));
-  return deduped.slice(0, limit);
+
+  // Drop papers with zero keyword overlap with the query.
+  // Extract meaningful query keywords (length >= 3 to skip prepositions/articles).
+  // We keep the threshold at >= 1 match so we only drop obvious non-matches,
+  // not borderline results where the paper title uses synonyms.
+  const queryKeywords = new Set(
+    normalizeTitle(query)
+      .split(" ")
+      .filter((w) => w.length >= 3)
+  );
+
+  const relevant =
+    queryKeywords.size === 0
+      ? deduped // no filterable keywords — don't drop anything
+      : deduped.filter((paper) => {
+          const titleWords = normalizeTitle(paper.title).split(" ");
+          return titleWords.some((w) => queryKeywords.has(w));
+        });
+
+  relevant.sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0));
+  return relevant.slice(0, limit);
 }
