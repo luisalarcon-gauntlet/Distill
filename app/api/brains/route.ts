@@ -32,12 +32,14 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { name, topic, directory, sourceCount } = body;
 
-    if (!name || !topic || !directory) {
+    if (!name || !directory) {
       return NextResponse.json(
-        { error: "name, topic, and directory are required" },
+        { error: "name and directory are required" },
         { status: 400 }
       );
     }
+
+    const searchTopic = typeof topic === "string" ? topic.trim() : "";
 
     const limit =
       typeof sourceCount === "number" && sourceCount > 0
@@ -52,22 +54,31 @@ export async function POST(request: Request) {
     const brainPath = path.join(directory, slug);
 
     // Initialize the wiki folder structure on disk.
-    initWikiDir(brainPath, topic);
+    initWikiDir(brainPath, searchTopic);
 
     // Search for papers across all three sources. No wiki generation yet.
-    const papers = await searchAllSources(topic, limit);
-    appendLog(
-      brainPath,
-      "search",
-      `Found ${papers.length} papers across Semantic Scholar, arXiv, OpenAlex (requested ${limit})`
-    );
+    let papers: Awaited<ReturnType<typeof searchAllSources>> = [];
+    if (searchTopic) {
+      papers = await searchAllSources(searchTopic, limit);
+      appendLog(
+        brainPath,
+        "search",
+        `Found ${papers.length} papers across Semantic Scholar, arXiv, OpenAlex (requested ${limit})`
+      );
+    } else {
+      appendLog(
+        brainPath,
+        "search",
+        "Brain created without research topic — skipping paper search"
+      );
+    }
 
     const now = new Date().toISOString();
     const brain = {
       id,
       name,
       path: brainPath,
-      topic,
+      topic: searchTopic,
       created: now,
       lastOpened: now,
     };

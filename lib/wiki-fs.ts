@@ -168,6 +168,7 @@ function toPosix(p: string): string {
  * Every category is shown, empty ones marked "(none yet)".
  */
 function renderIndexContent(topic: string, grouped: Record<PageType, WikiPage[]>): string {
+  const displayTopic = topic && topic.trim() ? topic : "Untitled Brain";
   const sections: Array<{ key: PageType; heading: string }> = [
     { key: "overview", heading: "Overview" },
     { key: "lecture", heading: "Lectures" },
@@ -177,7 +178,7 @@ function renderIndexContent(topic: string, grouped: Record<PageType, WikiPage[]>
     { key: "analysis", heading: "Analyses" },
   ];
 
-  let body = `\n# ${topic} — Wiki Index\n`;
+  let body = `\n# ${displayTopic} — Wiki Index\n`;
 
   for (const { key, heading } of sections) {
     body += `\n## ${heading}\n\n`;
@@ -282,6 +283,7 @@ Open \`index.md\` to browse the wiki, or use Obsidian's graph view to explore co
  * Creates all subdirectories and seed files (SCHEMA.md, index.md, log.md).
  */
 export function initWikiDir(dirPath: string, topic: string): void {
+  const effectiveTopic = topic && topic.trim() ? topic : "Untitled Brain";
   const dirs = [
     "",
     "raw",
@@ -306,12 +308,12 @@ export function initWikiDir(dirPath: string, topic: string): void {
 
   // Seed Obsidian vault config so "Open folder as vault" works out of the box.
   writeObsidianConfig(dirPath);
-  writeBrainReadme(dirPath, topic);
+  writeBrainReadme(dirPath, effectiveTopic);
 
   const date = today();
 
   // SCHEMA.md — full template with {TOPIC}/{DATE} replaced
-  const schema = SCHEMA_TEMPLATE.replace(/\{TOPIC\}/g, topic).replace(
+  const schema = SCHEMA_TEMPLATE.replace(/\{TOPIC\}/g, effectiveTopic).replace(
     /\{DATE\}/g,
     date
   );
@@ -326,13 +328,13 @@ export function initWikiDir(dirPath: string, topic: string): void {
     analysis: [],
     lecture: [],
   };
-  const indexBody = renderIndexContent(topic, emptyGrouped);
+  const indexBody = renderIndexContent(effectiveTopic, emptyGrouped);
   const indexFile = matter.stringify(indexBody, { title: "Index", updated: date });
   fs.writeFileSync(path.join(dirPath, "index.md"), indexFile, "utf-8");
 
   // log.md — header plus initial init entry
   const logContent =
-    `# Wiki Log\n\n## [${timestamp()}] init | Created brain for "${topic}"\n`;
+    `# Wiki Log\n\n## [${timestamp()}] init | Created brain for "${effectiveTopic}"\n`;
   fs.writeFileSync(path.join(dirPath, "log.md"), logContent, "utf-8");
 }
 
