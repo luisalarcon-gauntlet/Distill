@@ -35,7 +35,7 @@ const ZERO_USAGE: TokenUsage = { input_tokens: 0, output_tokens: 0 };
 interface CompilerPage {
   id: string;
   title: string;
-  type: "overview" | "concept" | "entity" | "source" | "analysis";
+  type: "overview" | "concept" | "entity" | "source" | "analysis" | "lecture";
   content: string;
   links: string[];
   sources: string[];
@@ -464,5 +464,247 @@ Return the JSON object described in the system prompt.`;
     };
   } catch {
     return { result: fallback, usage: { ...ZERO_USAGE } };
+  }
+}
+
+const CURRICULUM_COMPILER_SYSTEM = `You are a curriculum wiki compiler. You receive a parsed course syllabus (CurriculumStructure) and a set of classified PDFs (lectures, problem sets, exams, readings) and must compile them into a structured, interlinked wiki for a single course.
+
+Rules:
+- Produce exactly 1 overview page (type: "overview") that summarizes the whole course — course name, instructor, semester, unit structure, and a high-level narrative. It must [[link]] to every lecture page and to every concept page.
+- Produce 1 lecture page (type: "lecture") for every classified PDF whose type is "lecture". Lecture pages MUST be ordered by lectureNumber ascending; lectures with a null lectureNumber come last. Each lecture page must:
+  - Have a title derived from the classification title (or the matching syllabus lecture title)
+  - Summarize the key topics from the extracted text in 3-6 paragraphs
+  - Use [[Wiki Links]] liberally to concept pages
+  - Explicitly state prerequisites as [[Wiki Links]] to EARLIER lecture pages (never later ones); lecture 1 has no lecture prerequisites
+  - End the body with a raw-source footer: a horizontal rule then a markdown link to ../raw/pdfs/<filename>
+- Produce 3-8 concept pages (type: "concept") for the most important recurring ideas across lectures. Each concept page must name the [[Lecture pages]] that introduce it, and must cross-link to related concepts.
+- Produce 1 source page (type: "source") for each classified PDF whose type is "problem-set" or "exam". Each source page must link back to ../raw/pdfs/<filename> similarly.
+- Every page should carry [[Wiki Links]] wherever another page is referenced. Be generous with cross-references — the value is in the connections.
+- Page IDs are kebab-case slugs (e.g. "lecture-5-dynamic-programming", "attention-mechanism").
+- If courseInfo.units is empty (no syllabus available), infer lecture order purely from classification.lectureNumber, still placing null lectureNumbers last.
+
+Return ONLY valid JSON matching this shape, no markdown fences:
+{
+  "pages": {
+    "page-id": {
+      "id": "page-id",
+      "title": "...",
+      "type": "overview|lecture|concept|source",
+      "content": "markdown with [[Wiki Links]]",
+      "links": ["other-page-id", ...],
+      "sources": ["filename.pdf", ...]
+    }
+  }
+}`;
+
+/**
+ * Compile a full course curriculum wiki from a parsed syllabus structure and
+ * a set of classified PDFs with their extracted text.
+ *
+ * Returns the same shape as `compileWiki`. Resilient to malformed LLM
+ * responses — returns `{ pages: {} }` with whatever usage was consumed rather
+ * than throwing.
+ *
+ * Post-processes lecture pages to guarantee that each one ends with a link to
+ * `../raw/pdfs/{filename}` — if the LLM omits the raw-source footer, we
+ * append it ourselves.
+ */
+export async function compileCurriculum(
+  courseInfo: CurriculumStructure,
+  classifiedPDFs: Array<{
+    classification: PDFClassification;
+    extractedText: string;
+  }>
+): Promise<{
+  result: { pages: Record<string, CompilerPage> };
+  usage: TokenUsage;
+}> {
+  const TRIM_CHARS = 2000;
+
+  // Order lectures by lectureNumber, with nulls last, so the prompt itself
+  // reflects the required ordering.
+  const lectures = classifiedPDFs
+    .filter((p) => p.classification.type === "lecture")
+    .slice()
+    .sort((a, b) => {
+      const an = a.classification.lectureNumber;
+      const bn = b.classification.lectureNumber;
+      if (an === null && bn === null) return 0;
+      if (an === null) return 1;
+      if (bn === null) return -1;
+      return an - bn;
+    });
+
+  const sourcesPDFs = classifiedPDFs.filter(
+    (p) =>
+      p.classification.type === "problem-set" ||
+      p.classification.type === "exam"
+  );
+
+  const lectureContext = lectures
+    .map((p) => {
+      const c = p.classification;
+      const trimmed = (p.extractedText || "").slice(0, TRIM_CHARS);
+      return `- filename: ${c.filename}
+  lectureNumber: ${c.lectureNumber ?? "null"}
+  title: ${c.title}
+  text preview: ${trimmed}`;
+    })
+    .join("\n\n");
+
+  const sourceContext = sourcesPDFs
+    .map((p) => {
+      const c = p.classification;
+      const trimmed = (p.extractedText || "").slice(0, TRIM_CHARS);
+      return `- filename: ${c.filename}
+  type: ${c.type}
+  title: ${c.title}
+  text preview: ${trimmed}`;
+    })
+    .join("\n\n");
+
+  // Keep the full CurriculumStructure but serialize compactly.
+  const courseInfoJson = JSON.stringify(courseInfo);
+
+  const prompt = `Compile a curriculum wiki for the following course.
+
+--- COURSE INFO (CurriculumStructure) ---
+${courseInfoJson}
+--- END COURSE INFO ---
+
+--- LECTURES (${lectures.length}) ---
+${lectureContext || "(no lecture PDFs)"}
+--- END LECTURES ---
+
+--- PROBLEM SETS / EXAMS (${sourcesPDFs.length}) ---
+${sourceContext || "(none)"}
+--- END PROBLEM SETS / EXAMS ---
+
+Generate the JSON wiki object described in the system prompt.
+
+Hard requirements:
+- 1 overview page (type: "overview")
+- 1 lecture page (type: "lecture") per lecture PDF above, ordered by lectureNumber (nulls last). Each lecture page body must END with:
+  \\n\\n---\\n📎 **Raw source:** [<filename>](../raw/pdfs/<filename>)
+- 3-8 concept pages (type: "concept"), each cross-referencing the lectures that introduce the concept via [[Wiki Links]]
+- 1 source page (type: "source") per problem-set / exam PDF above, each containing a markdown link to ../raw/pdfs/<filename>
+- Use [[Wiki Links]] liberally throughout every page
+- Prerequisite [[Wiki Links]] on a lecture page must only point to earlier lecture pages`;
+
+  const emptyResult = { pages: {} as Record<string, CompilerPage> };
+
+  let usage: TokenUsage = { ...ZERO_USAGE };
+  try {
+    const response = await llmJSON<unknown>(
+      CURRICULUM_COMPILER_SYSTEM,
+      prompt,
+      8192
+    );
+    usage = response.usage;
+
+    const data = response.data;
+    if (!data || typeof data !== "object") {
+      return { result: emptyResult, usage };
+    }
+
+    const rawPages = (data as Record<string, unknown>).pages;
+    if (!rawPages || typeof rawPages !== "object") {
+      return { result: emptyResult, usage };
+    }
+
+    const validTypes = [
+      "overview",
+      "concept",
+      "entity",
+      "source",
+      "analysis",
+      "lecture",
+    ] as const;
+
+    const pages: Record<string, CompilerPage> = {};
+    for (const [key, value] of Object.entries(
+      rawPages as Record<string, unknown>
+    )) {
+      if (!value || typeof value !== "object") continue;
+      const v = value as Record<string, unknown>;
+
+      const id = typeof v.id === "string" && v.id.trim().length > 0 ? v.id : key;
+      const title =
+        typeof v.title === "string" && v.title.trim().length > 0
+          ? v.title
+          : key;
+      const type = (validTypes as readonly string[]).includes(v.type as string)
+        ? (v.type as CompilerPage["type"])
+        : "concept";
+      const content = typeof v.content === "string" ? v.content : "";
+      const links = Array.isArray(v.links)
+        ? v.links.filter((l): l is string => typeof l === "string")
+        : [];
+      const sources = Array.isArray(v.sources)
+        ? v.sources.filter((s): s is string => typeof s === "string")
+        : [];
+
+      pages[key] = { id, title, type, content, links, sources };
+    }
+
+    // Post-process: guarantee every lecture page has a raw-source footer.
+    // Match each lecture page to an input lecture PDF in order.
+    const lecturePageKeys = Object.keys(pages).filter(
+      (k) => pages[k].type === "lecture"
+    );
+
+    // Primary matching: by sources array or content references.
+    const usedFilenames = new Set<string>();
+    const pageToFilename = new Map<string, string>();
+
+    for (const key of lecturePageKeys) {
+      const page = pages[key];
+      // Try to find a filename already referenced in sources or content.
+      let matched: string | null = null;
+      for (const lec of lectures) {
+        const fname = lec.classification.filename;
+        if (usedFilenames.has(fname)) continue;
+        if (
+          page.sources.includes(fname) ||
+          page.content.includes(fname)
+        ) {
+          matched = fname;
+          break;
+        }
+      }
+      if (matched) {
+        pageToFilename.set(key, matched);
+        usedFilenames.add(matched);
+      }
+    }
+
+    // Fallback matching: assign remaining lecture pages to remaining lectures
+    // in order (lectures are already sorted by lectureNumber nulls-last).
+    const remainingKeys = lecturePageKeys.filter((k) => !pageToFilename.has(k));
+    const remainingLectures = lectures.filter(
+      (l) => !usedFilenames.has(l.classification.filename)
+    );
+    for (let i = 0; i < remainingKeys.length && i < remainingLectures.length; i++) {
+      const key = remainingKeys[i];
+      const fname = remainingLectures[i].classification.filename;
+      pageToFilename.set(key, fname);
+      usedFilenames.add(fname);
+    }
+
+    for (const [key, fname] of pageToFilename.entries()) {
+      const page = pages[key];
+      const rawPath = `../raw/pdfs/${fname}`;
+      if (!page.content.includes(rawPath)) {
+        const footer = `\n\n---\n📎 **Raw source:** [${fname}](${rawPath})`;
+        page.content = `${page.content}${footer}`;
+        if (!page.sources.includes(fname)) {
+          page.sources.push(fname);
+        }
+      }
+    }
+
+    return { result: { pages }, usage };
+  } catch {
+    return { result: emptyResult, usage };
   }
 }

@@ -1,5 +1,11 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
-import { classifyPDFs, parseSyllabus } from "./compiler";
+import {
+  classifyPDFs,
+  compileCurriculum,
+  parseSyllabus,
+  type CurriculumStructure,
+  type PDFClassification,
+} from "./compiler";
 
 // ---------------------------------------------------------------------------
 // Helpers — mirror the mocking pattern used in llm.test.ts
@@ -385,5 +391,293 @@ describe("parseSyllabus()", () => {
     const { result } = await parseSyllabus("x");
 
     expect(result.courseName).toBe("Untitled Course");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// compileCurriculum()
+// ---------------------------------------------------------------------------
+
+describe("compileCurriculum()", () => {
+  const courseInfo: CurriculumStructure = {
+    courseName: "Intro to Algorithms",
+    courseCode: "6.006",
+    instructor: "Erik Demaine",
+    semester: "Fall 2024",
+    units: [
+      {
+        title: "Foundations",
+        lectures: [
+          { number: 1, title: "Introduction", topics: ["big-O"] },
+          { number: 2, title: "Sorting", topics: ["merge sort"] },
+        ],
+      },
+    ],
+  };
+
+  const classifiedPDFs: Array<{
+    classification: PDFClassification;
+    extractedText: string;
+  }> = [
+    {
+      classification: {
+        filename: "Lec1.pdf",
+        type: "lecture",
+        lectureNumber: 1,
+        title: "Lecture 1: Introduction",
+      },
+      extractedText: "Welcome to the course. Today we cover big-O notation.",
+    },
+    {
+      classification: {
+        filename: "Lec2.pdf",
+        type: "lecture",
+        lectureNumber: 2,
+        title: "Lecture 2: Sorting",
+      },
+      extractedText: "Today we discuss merge sort and quick sort.",
+    },
+    {
+      classification: {
+        filename: "PS1.pdf",
+        type: "problem-set",
+        lectureNumber: null,
+        title: "Problem Set 1",
+      },
+      extractedText: "Problem 1. Prove that ...",
+    },
+  ];
+
+  it("returns the expected shape with a mocked well-formed LLM response", async () => {
+    stubLLMResponse(
+      JSON.stringify({
+        pages: {
+          "course-overview": {
+            id: "course-overview",
+            title: "Intro to Algorithms",
+            type: "overview",
+            content:
+              "Overview of the course with [[Lecture 1]] and [[Lecture 2]].",
+            links: ["lecture-1", "lecture-2"],
+            sources: [],
+          },
+          "lecture-1": {
+            id: "lecture-1",
+            title: "Lecture 1: Introduction",
+            type: "lecture",
+            content:
+              "Intro lecture. [[big-O]]\n\n---\n📎 **Raw source:** [Lec1.pdf](../raw/pdfs/Lec1.pdf)",
+            links: ["big-o"],
+            sources: ["Lec1.pdf"],
+          },
+          "lecture-2": {
+            id: "lecture-2",
+            title: "Lecture 2: Sorting",
+            type: "lecture",
+            content:
+              "Sorting. Prereq [[Lecture 1]].\n\n---\n📎 **Raw source:** [Lec2.pdf](../raw/pdfs/Lec2.pdf)",
+            links: ["lecture-1"],
+            sources: ["Lec2.pdf"],
+          },
+          "big-o": {
+            id: "big-o",
+            title: "Big-O Notation",
+            type: "concept",
+            content: "Introduced in [[Lecture 1]].",
+            links: ["lecture-1"],
+            sources: [],
+          },
+          "merge-sort": {
+            id: "merge-sort",
+            title: "Merge Sort",
+            type: "concept",
+            content: "Introduced in [[Lecture 2]].",
+            links: ["lecture-2"],
+            sources: [],
+          },
+          "divide-conquer": {
+            id: "divide-conquer",
+            title: "Divide and Conquer",
+            type: "concept",
+            content: "See [[Lecture 2]] and [[Merge Sort]].",
+            links: ["lecture-2", "merge-sort"],
+            sources: [],
+          },
+          "problem-set-1": {
+            id: "problem-set-1",
+            title: "Problem Set 1",
+            type: "source",
+            content:
+              "PS1 covers material from [[Lecture 1]]. [PS1.pdf](../raw/pdfs/PS1.pdf)",
+            links: ["lecture-1"],
+            sources: ["PS1.pdf"],
+          },
+        },
+      }),
+      111,
+      222
+    );
+
+    const { result, usage } = await compileCurriculum(
+      courseInfo,
+      classifiedPDFs
+    );
+
+    expect(usage).toEqual({ input_tokens: 111, output_tokens: 222 });
+    expect(result.pages).toBeDefined();
+    const keys = Object.keys(result.pages);
+    expect(keys).toContain("course-overview");
+    expect(keys).toContain("lecture-1");
+    expect(keys).toContain("lecture-2");
+
+    expect(result.pages["course-overview"].type).toBe("overview");
+    expect(result.pages["lecture-1"].type).toBe("lecture");
+    expect(result.pages["lecture-1"].content).toContain(
+      "../raw/pdfs/Lec1.pdf"
+    );
+    expect(result.pages["lecture-2"].content).toContain(
+      "../raw/pdfs/Lec2.pdf"
+    );
+    expect(result.pages["problem-set-1"].type).toBe("source");
+  });
+
+  it("appends raw-source footer to lecture pages missing it (post-process fallback)", async () => {
+    // LLM returns lecture pages WITHOUT the required raw source footer.
+    stubLLMResponse(
+      JSON.stringify({
+        pages: {
+          "lecture-1": {
+            id: "lecture-1",
+            title: "Lecture 1: Introduction",
+            type: "lecture",
+            content: "Intro lecture body with no footer.",
+            links: [],
+            sources: ["Lec1.pdf"],
+          },
+          "lecture-2": {
+            id: "lecture-2",
+            title: "Lecture 2: Sorting",
+            type: "lecture",
+            content: "Sorting body with no footer either.",
+            links: [],
+            sources: ["Lec2.pdf"],
+          },
+        },
+      })
+    );
+
+    const { result } = await compileCurriculum(courseInfo, classifiedPDFs);
+
+    expect(result.pages["lecture-1"].content).toContain(
+      "../raw/pdfs/Lec1.pdf"
+    );
+    expect(result.pages["lecture-1"].content).toContain("Raw source");
+    expect(result.pages["lecture-2"].content).toContain(
+      "../raw/pdfs/Lec2.pdf"
+    );
+  });
+
+  it("falls back to lectureNumber ordering when units is empty", async () => {
+    const emptyUnitsCourse: CurriculumStructure = {
+      courseName: "Unstructured Course",
+      courseCode: null,
+      instructor: null,
+      semester: null,
+      units: [],
+    };
+
+    // Lectures deliberately provided out of order; null should go last.
+    const pdfs: Array<{
+      classification: PDFClassification;
+      extractedText: string;
+    }> = [
+      {
+        classification: {
+          filename: "Lec3.pdf",
+          type: "lecture",
+          lectureNumber: 3,
+          title: "Third",
+        },
+        extractedText: "third lecture",
+      },
+      {
+        classification: {
+          filename: "LecExtra.pdf",
+          type: "lecture",
+          lectureNumber: null,
+          title: "Bonus",
+        },
+        extractedText: "bonus lecture",
+      },
+      {
+        classification: {
+          filename: "Lec1.pdf",
+          type: "lecture",
+          lectureNumber: 1,
+          title: "First",
+        },
+        extractedText: "first lecture",
+      },
+    ];
+
+    stubLLMResponse(
+      JSON.stringify({
+        pages: {
+          "lecture-1": {
+            id: "lecture-1",
+            title: "First",
+            type: "lecture",
+            content: "First lecture content.",
+            links: [],
+            sources: ["Lec1.pdf"],
+          },
+          "lecture-3": {
+            id: "lecture-3",
+            title: "Third",
+            type: "lecture",
+            content: "Third lecture content.",
+            links: [],
+            sources: ["Lec3.pdf"],
+          },
+          "lecture-bonus": {
+            id: "lecture-bonus",
+            title: "Bonus",
+            type: "lecture",
+            content: "Bonus lecture content.",
+            links: [],
+            sources: ["LecExtra.pdf"],
+          },
+        },
+      })
+    );
+
+    const { result } = await compileCurriculum(emptyUnitsCourse, pdfs);
+
+    // All three lecture pages got raw-source footers pointing at the correct files.
+    expect(result.pages["lecture-1"].content).toContain(
+      "../raw/pdfs/Lec1.pdf"
+    );
+    expect(result.pages["lecture-3"].content).toContain(
+      "../raw/pdfs/Lec3.pdf"
+    );
+    expect(result.pages["lecture-bonus"].content).toContain(
+      "../raw/pdfs/LecExtra.pdf"
+    );
+  });
+
+  it("returns { pages: {} } on malformed (non-JSON) LLM response", async () => {
+    stubLLMResponse("absolutely not JSON");
+
+    const { result } = await compileCurriculum(courseInfo, classifiedPDFs);
+
+    expect(result).toEqual({ pages: {} });
+  });
+
+  it("returns { pages: {} } when LLM response JSON has no pages field", async () => {
+    stubLLMResponse(JSON.stringify({ unrelated: "shape" }));
+
+    const { result } = await compileCurriculum(courseInfo, classifiedPDFs);
+
+    expect(result).toEqual({ pages: {} });
   });
 });
