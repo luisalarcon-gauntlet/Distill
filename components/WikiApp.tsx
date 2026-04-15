@@ -455,6 +455,7 @@ export default function WikiApp() {
   const [researchEnabled, setResearchEnabled] = useState(false);
   const [pdfEnabled, setPdfEnabled] = useState(false);
   const [pdfDragOver, setPdfDragOver] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Review state (step 2 of brain creation)
   const [pendingBrain, setPendingBrain] = useState<BrainConfig | null>(null);
@@ -1246,6 +1247,10 @@ export default function WikiApp() {
             onClick={() => {
               setScreen("brains");
               setError(null);
+              setResearchEnabled(false);
+              setPdfEnabled(false);
+              setUploadFiles([]);
+              setCreateTopic("");
             }}
             className="mb-6"
             style={{
@@ -1530,7 +1535,12 @@ export default function WikiApp() {
 
           {/* Research papers card */}
           <div
-            onClick={() => setResearchEnabled((v) => !v)}
+            onClick={() => {
+              setResearchEnabled((v) => {
+                if (v) setCreateTopic("");
+                return !v;
+              });
+            }}
             style={{
               background: researchEnabled
                 ? "rgba(196,161,255,0.06)"
@@ -1599,7 +1609,10 @@ export default function WikiApp() {
               <div
                 onClick={(e) => {
                   e.stopPropagation();
-                  setResearchEnabled((v) => !v);
+                  setResearchEnabled((v) => {
+                    if (v) setCreateTopic("");
+                    return !v;
+                  });
                 }}
                 style={{
                   position: "relative",
@@ -1692,7 +1705,12 @@ export default function WikiApp() {
 
           {/* Upload PDFs card */}
           <div
-            onClick={() => setPdfEnabled((v) => !v)}
+            onClick={() => {
+              setPdfEnabled((v) => {
+                if (v) setUploadFiles([]);
+                return !v;
+              });
+            }}
             style={{
               background: pdfEnabled
                 ? "rgba(126,201,154,0.06)"
@@ -1777,7 +1795,10 @@ export default function WikiApp() {
               <div
                 onClick={(e) => {
                   e.stopPropagation();
-                  setPdfEnabled((v) => !v);
+                  setPdfEnabled((v) => {
+                    if (v) setUploadFiles([]);
+                    return !v;
+                  });
                 }}
                 style={{
                   position: "relative",
@@ -1957,30 +1978,35 @@ export default function WikiApp() {
 
           {/* Create button */}
           <button
-            onClick={() => {
-              if (!canCreate) return;
-              if (pdfEnabled && researchEnabled) {
-                handleHybridCreate();
-              } else if (pdfEnabled) {
-                handleUploadCreate();
-              } else {
-                handleCreate();
+            onClick={async () => {
+              if (!canCreate || isSubmitting) return;
+              setIsSubmitting(true);
+              try {
+                if (pdfEnabled && researchEnabled) {
+                  await handleHybridCreate();
+                } else if (pdfEnabled) {
+                  await handleUploadCreate();
+                } else {
+                  await handleCreate();
+                }
+              } finally {
+                setIsSubmitting(false);
               }
             }}
-            disabled={!canCreate}
+            disabled={!canCreate || isSubmitting}
             className="w-full rounded-lg font-medium"
             style={{
               marginTop: 20,
               padding: "12px",
               fontFamily: "IBM Plex Mono",
               fontSize: 14,
-              color: canCreate ? "#0a0a0f" : "#4a4a5c",
-              background: canCreate ? "#c4a1ff" : "#1e1e2e",
+              color: canCreate && !isSubmitting ? "#0a0a0f" : "#4a4a5c",
+              background: canCreate && !isSubmitting ? "#c4a1ff" : "#1e1e2e",
               border: "none",
-              cursor: canCreate ? "pointer" : "not-allowed",
+              cursor: canCreate && !isSubmitting ? "pointer" : "not-allowed",
             }}
           >
-            {buttonLabel}
+            {isSubmitting ? "Creating..." : buttonLabel}
           </button>
 
           {canCreate && compositionParts.length > 0 && (
@@ -2041,7 +2067,9 @@ export default function WikiApp() {
             Review Papers
           </h1>
           <p className="mb-8" style={{ fontSize: 13, color: "#7a7a8c" }}>
-            {hasNoInitialPapers
+            {hybridMode
+              ? "Your curriculum wiki is ready. Review these papers to add to it."
+              : hasNoInitialPapers
               ? `No papers found for "${pendingBrain?.topic}". Try different keywords below, or compile an empty brain you can fill manually.`
               : `${candidatePapers.length} paper${candidatePapers.length === 1 ? "" : "s"} found for "${pendingBrain?.topic}". Uncheck any you don't want included.`}
           </p>
@@ -2219,7 +2247,11 @@ export default function WikiApp() {
                 cursor: "pointer",
               }}
             >
-              {selectedCount === 0 ? "Compile Empty Brain →" : "Compile Brain →"}
+              {hybridMode
+                ? "Add papers to wiki"
+                : selectedCount === 0
+                ? "Compile Empty Brain →"
+                : "Compile Brain →"}
             </button>
           </div>
         </div>
