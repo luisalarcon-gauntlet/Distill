@@ -485,6 +485,12 @@ export default function WikiApp() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const uploadTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
+  // Sidebar PDF drop-zone state (upload into an already-open brain)
+  const [sidebarUploading, setSidebarUploading] = useState(false);
+  const [sidebarUploadStatus, setSidebarUploadStatus] = useState<string | null>(null);
+  const [sidebarDragOver, setSidebarDragOver] = useState(false);
+  const sidebarUploadInputRef = useRef<HTMLInputElement>(null);
+
   // Clear any pending upload-progress timers on unmount
   useEffect(() => {
     return () => {
@@ -841,6 +847,33 @@ export default function WikiApp() {
       setIngesting(false);
     }
   }, [activeBrain, ingestResults, ingestSelected, loadBrain]);
+
+  const handleSidebarUpload = useCallback(
+    async (files: File[]) => {
+      if (!activeBrain || files.length === 0) return;
+      setSidebarUploading(true);
+      setSidebarUploadStatus(`Uploading ${files.length} files...`);
+      try {
+        const formData = new FormData();
+        for (const f of files) formData.append("files", f);
+        const res = await fetch(`/api/brains/${activeBrain.id}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) throw new Error("Upload failed");
+        const data = await res.json();
+        await loadBrain(activeBrain.id);
+        setSidebarUploadStatus(`\u2713 ${data.filesUploaded} files added`);
+        setTimeout(() => setSidebarUploadStatus(null), 2000);
+      } catch (e) {
+        setSidebarUploadStatus("Upload failed");
+        setTimeout(() => setSidebarUploadStatus(null), 2000);
+      } finally {
+        setSidebarUploading(false);
+      }
+    },
+    [activeBrain, loadBrain]
+  );
 
   const handleQuery = useCallback(async () => {
     if (!queryText.trim() || !activeBrain) return;
@@ -2082,6 +2115,115 @@ export default function WikiApp() {
             >
               {ingestSearching ? "..." : "go"}
             </button>
+          </div>
+
+          {/* PDF drop zone */}
+          <style>{`@keyframes uploadPulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }`}</style>
+          <div
+            onClick={() => {
+              if (!sidebarUploading) sidebarUploadInputRef.current?.click();
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setSidebarDragOver(true);
+            }}
+            onDragLeave={() => setSidebarDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setSidebarDragOver(false);
+              if (sidebarUploading) return;
+              const dropped = Array.from(e.dataTransfer.files);
+              const pdfFiles = dropped.filter((f) => f.name.toLowerCase().endsWith(".pdf"));
+              if (pdfFiles.length > 0) void handleSidebarUpload(pdfFiles);
+            }}
+            style={{
+              marginTop: 8,
+              padding: 14,
+              textAlign: "center",
+              borderRadius: 8,
+              border: sidebarDragOver
+                ? "1.5px dashed rgba(196,161,255,0.5)"
+                : "1.5px dashed rgba(196,161,255,0.25)",
+              background: sidebarDragOver ? "rgba(196,161,255,0.03)" : "transparent",
+              cursor: sidebarUploading ? "default" : "pointer",
+              transition: "border-color 0.15s ease, background 0.15s ease",
+            }}
+          >
+            <input
+              ref={sidebarUploadInputRef}
+              type="file"
+              multiple
+              accept=".pdf"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const picked = Array.from(e.target.files ?? []);
+                if (picked.length > 0) void handleSidebarUpload(picked);
+                e.target.value = "";
+              }}
+            />
+            {sidebarUploading ? (
+              <div
+                style={{
+                  fontFamily: "IBM Plex Mono",
+                  fontSize: 12,
+                  color: "#c4a1ff",
+                  animation: "uploadPulse 1.2s ease-in-out infinite",
+                }}
+              >
+                {sidebarUploadStatus ?? "Uploading..."}
+              </div>
+            ) : sidebarUploadStatus ? (
+              <div
+                style={{
+                  fontFamily: "IBM Plex Mono",
+                  fontSize: 12,
+                  color: sidebarUploadStatus.startsWith("\u2713")
+                    ? "#7ec99a"
+                    : sidebarUploadStatus === "Upload failed"
+                    ? "#ff6b6b"
+                    : "#7a7a8c",
+                }}
+              >
+                {sidebarUploadStatus}
+              </div>
+            ) : (
+              <>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke={sidebarDragOver ? "#c4a1ff" : "#7a7a8c"}
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ display: "block", margin: "0 auto 6px" }}
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                <div
+                  style={{
+                    fontFamily: "IBM Plex Mono",
+                    fontSize: 12,
+                    color: "#7a7a8c",
+                    marginBottom: 2,
+                  }}
+                >
+                  Drop PDFs here
+                </div>
+                <div
+                  style={{
+                    fontFamily: "IBM Plex Mono",
+                    fontSize: 12,
+                    color: "#c4a1ff",
+                  }}
+                >
+                  or click to browse
+                </div>
+              </>
+            )}
           </div>
 
           {/* Results dropdown */}
