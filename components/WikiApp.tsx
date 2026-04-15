@@ -62,7 +62,21 @@ interface TokenSummary {
   provider: string;
 }
 
-type Screen = "brains" | "create" | "review" | "loading" | "wiki";
+type Screen = "brains" | "create" | "review" | "loading" | "upload-loading" | "wiki";
+
+interface UploadStep {
+  message: string;
+  done: boolean;
+}
+
+const UPLOAD_STEP_TEMPLATES = [
+  (n: number) => `Uploading ${n} file${n === 1 ? "" : "s"}...`,
+  () => "Extracting text from PDFs...",
+  () => "Classifying documents...",
+  () => "Parsing syllabus...",
+  () => "Compiling curriculum wiki...",
+  () => "Done!",
+];
 
 // ─── Source badges ───
 const SOURCE_LABELS: Record<Paper["source_api"], string> = {
@@ -466,6 +480,18 @@ export default function WikiApp() {
   // Upload-your-own-files flow (alternative to paper search on create screen)
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const [uploadSteps, setUploadSteps] = useState<UploadStep[]>([]);
+  const [uploadCurrentStep, setUploadCurrentStep] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const uploadTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  // Clear any pending upload-progress timers on unmount
+  useEffect(() => {
+    return () => {
+      for (const t of uploadTimersRef.current) clearTimeout(t);
+      uploadTimersRef.current = [];
+    };
+  }, []);
 
   // Token usage stats for the active brain
   const [tokenSummary, setTokenSummary] = useState<TokenSummary | null>(null);
@@ -583,12 +609,48 @@ export default function WikiApp() {
     }
   }, [createName, createTopic, createDir, sourceCount, loadBrain]);
 
+  const clearUploadTimers = useCallback(() => {
+    for (const t of uploadTimersRef.current) clearTimeout(t);
+    uploadTimersRef.current = [];
+  }, []);
+
   const handleUploadCreate = useCallback(async () => {
     if (uploadFiles.length === 0) return;
     if (!createName.trim() || !createDir) return;
-    setScreen("loading");
-    setLoadingMessage("Creating brain from uploaded files...");
+
+    const n = uploadFiles.length;
+    const initialSteps: UploadStep[] = UPLOAD_STEP_TEMPLATES.map((fn) => ({
+      message: fn(n),
+      done: false,
+    }));
+    setUploadSteps(initialSteps);
+    setUploadCurrentStep(0);
+    setUploadError(null);
     setError(null);
+    setScreen("upload-loading");
+
+    // Simulated progress timeline. The final "Done!" step (index 5) is only
+    // marked active after the fetch resolves, so step 4 ("Compiling...") stays
+    // active until we hear back.
+    clearUploadTimers();
+    const schedule: Array<{ at: number; doneIdx: number; activeIdx: number }> = [
+      { at: 1000, doneIdx: 0, activeIdx: 1 },
+      { at: 3000, doneIdx: 1, activeIdx: 2 },
+      { at: 5000, doneIdx: 2, activeIdx: 3 },
+      { at: 6000, doneIdx: 3, activeIdx: 4 },
+    ];
+    for (const { at, doneIdx, activeIdx } of schedule) {
+      const id = setTimeout(() => {
+        setUploadSteps((prev) => {
+          const next = prev.slice();
+          if (next[doneIdx]) next[doneIdx] = { ...next[doneIdx], done: true };
+          return next;
+        });
+        setUploadCurrentStep(activeIdx);
+      }, at);
+      uploadTimersRef.current.push(id);
+    }
+
     try {
       const formData = new FormData();
       formData.append("name", createName);
@@ -605,14 +667,32 @@ export default function WikiApp() {
       }
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+
+      clearUploadTimers();
+
+      const syllabusFound = Boolean(data?.pipeline?.syllabusFound);
+      const courseName: string | undefined = data?.pipeline?.courseName;
+
+      // Mark all working steps done, then flip "Done!" active → done.
+      setUploadSteps((prev) => {
+        const next = prev.map((s) => ({ ...s, done: true }));
+        if (syllabusFound && courseName && next[3]) {
+          next[3] = { ...next[3], message: `Parsing syllabus... ${courseName}` };
+        }
+        // Final "Done!" step stays visible as the completed tail.
+        return next;
+      });
+      setUploadCurrentStep(UPLOAD_STEP_TEMPLATES.length - 1);
+
       await loadBrains();
       setUploadFiles([]);
+      await new Promise((resolve) => setTimeout(resolve, 800));
       await loadBrain(data.brain.id);
     } catch (e: any) {
-      setError(e.message || "Upload failed");
-      setScreen("create");
+      clearUploadTimers();
+      setUploadError(e.message || "Upload failed");
     }
-  }, [uploadFiles, createName, createTopic, createDir, loadBrain]);
+  }, [uploadFiles, createName, createTopic, createDir, loadBrain, clearUploadTimers]);
 
   const toggleSelectedPaper = useCallback((paperId: string) => {
     setSelectedPaperIds((prev) => {
@@ -1797,6 +1877,109 @@ export default function WikiApp() {
           </p>
           <style>{`@keyframes pulse { 0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.2); } }`}</style>
         </div>
+      </div>
+    );
+  }
+
+  // ─── UPLOAD LOADING ───
+  if (screen === "upload-loading") {
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center px-4"
+        style={{ background: "#0f0f17" }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+            minWidth: 280,
+          }}
+        >
+          {uploadError ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div
+                style={{
+                  fontFamily: "IBM Plex Mono",
+                  fontSize: 13,
+                  color: "#d46a6a",
+                  background: "rgba(212,106,106,0.1)",
+                  border: "1px solid rgba(212,106,106,0.2)",
+                  padding: "12px 16px",
+                  borderRadius: 8,
+                  lineHeight: 1.6,
+                  maxWidth: 420,
+                }}
+              >
+                {uploadError}
+              </div>
+              <button
+                onClick={() => {
+                  clearUploadTimers();
+                  setUploadError(null);
+                  setUploadSteps([]);
+                  setUploadCurrentStep(0);
+                  setScreen("create");
+                }}
+                style={{
+                  fontFamily: "IBM Plex Mono",
+                  fontSize: 13,
+                  color: "#8b6fc0",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  textAlign: "left",
+                }}
+              >
+                &larr; Back
+              </button>
+            </div>
+          ) : (
+            uploadSteps.map((step, i) => {
+              const isDone = step.done;
+              const isCurrent = !isDone && i === uploadCurrentStep;
+              const isPending = !isDone && !isCurrent;
+              const messageColor = isPending ? "#5a5a6c" : "#c4a1ff";
+              return (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    fontFamily: "IBM Plex Mono",
+                    fontSize: 13,
+                    color: messageColor,
+                    textAlign: "left",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 14,
+                      fontSize: 13,
+                      color: isDone
+                        ? "#7ec99a"
+                        : isCurrent
+                        ? "#c4a1ff"
+                        : "#4a4a5c",
+                      animation: isCurrent
+                        ? "uploadPulse 1.2s ease-in-out infinite"
+                        : undefined,
+                    }}
+                  >
+                    {isDone ? "\u2713" : "\u25cf"}
+                  </span>
+                  <span>{step.message}</span>
+                </div>
+              );
+            })
+          )}
+        </div>
+        <style>{`@keyframes uploadPulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }`}</style>
       </div>
     );
   }
