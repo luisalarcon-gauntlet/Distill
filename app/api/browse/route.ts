@@ -3,6 +3,17 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
+const ALLOWED_ROOTS = (process.env.BROWSE_ALLOWED_ROOTS || os.homedir())
+  .split(":")
+  .map((r) => path.resolve(r));
+
+function isPathAllowed(p: string): boolean {
+  const resolved = path.resolve(p);
+  return ALLOWED_ROOTS.some(
+    (root) => resolved === root || resolved.startsWith(root + path.sep)
+  );
+}
+
 const SKIP_DIRS = new Set([
   "node_modules",
   "__pycache__",
@@ -20,6 +31,14 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const rawPath = searchParams.get("path") || os.homedir();
     const current = path.resolve(rawPath);
+
+    if (!isPathAllowed(current)) {
+      return NextResponse.json(
+        { error: "Path is outside the allowed directory" },
+        { status: 403 }
+      );
+    }
+
     const parent = path.dirname(current) !== current ? path.dirname(current) : null;
 
     const entries = fs.readdirSync(current, { withFileTypes: true });
@@ -64,6 +83,13 @@ export async function POST(request: Request) {
     }
 
     const fullPath = path.join(path.resolve(parent), safeName);
+
+    if (!isPathAllowed(fullPath)) {
+      return NextResponse.json(
+        { error: "Path is outside the allowed directory" },
+        { status: 403 }
+      );
+    }
 
     if (fs.existsSync(fullPath)) {
       return NextResponse.json({ error: "Folder already exists" }, { status: 409 });

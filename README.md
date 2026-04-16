@@ -4,7 +4,7 @@
 
 Distill searches Semantic Scholar, arXiv, and OpenAlex for papers on your topic, lets you curate which ones to include, then uses an LLM to compile them into a structured, cross-referenced wiki — overviews, concept breakdowns, entity profiles, source summaries — all as real `.md` files you can open in Obsidian or any editor.
 
-Built on the [compiled wiki pattern](https://github.com/karpathy/LLM-Wiki) described by Andrej Karpathy.
+Built on the [compiled wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) described by Andrej Karpathy.
 
 ![Distill wiki viewer](docs/screenshot.png)
 
@@ -190,7 +190,7 @@ Distill is open source and contributions are welcome.
 
 ## Inspired By
 
-- [LLM Wiki](https://github.com/karpathy/LLM-Wiki) by Andrej Karpathy — the compiled wiki pattern this implements
+- [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) by Andrej Karpathy — the compiled wiki pattern this implements
 - [Vannevar Bush's Memex](https://en.wikipedia.org/wiki/Memex) (1945) — the original vision of a personal knowledge store with associative trails
 
 ## License
