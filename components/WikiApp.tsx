@@ -377,18 +377,23 @@ function PageView({
 
   return (
     <div>
-      <div className="flex items-center gap-2.5 mb-1">
+      <div className="flex items-center gap-2.5 mb-1" style={{ overflow: "hidden" }}>
         <span
           className="uppercase text-[10px] tracking-widest px-2 py-0.5 rounded"
           style={{
             color: typeColor[page.type] || "#7a7a8c",
             background: `${typeColor[page.type] || "#7a7a8c"}15`,
             fontFamily: "IBM Plex Mono",
+            flexShrink: 0,
           }}
         >
           {page.type}
         </span>
-        <span style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#4a4a5c" }}>
+        <span
+          className="truncate"
+          title={page.filepath}
+          style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#4a4a5c", minWidth: 0 }}
+        >
           {page.filepath}
         </span>
       </div>
@@ -2874,13 +2879,15 @@ export default function WikiApp() {
                   }}
                 >
                   <div
+                    className="truncate"
+                    title={p.title}
                     style={{
                       fontSize: 13,
                       color: activePage === p.id ? "#e0dfe6" : "#7a7a8c",
                       fontWeight: activePage === p.id ? 500 : 400,
                     }}
                   >
-                    {p.title.length > 30 ? p.title.slice(0, 28) + "..." : p.title}
+                    {p.title}
                   </div>
                   <span
                     className="uppercase tracking-wider"

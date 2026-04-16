@@ -164,6 +164,17 @@ function toPosix(p: string): string {
 }
 
 /**
+ * Truncate an over-long kebab-case slug to keep filesystem paths manageable
+ * (Windows caps paths at 260 chars). Prefers cutting at a word boundary.
+ */
+function truncateSlug(slug: string, maxLength: number = 50): string {
+  if (slug.length <= maxLength) return slug;
+  const truncated = slug.slice(0, maxLength);
+  const lastDash = truncated.lastIndexOf("-");
+  return lastDash > 20 ? truncated.slice(0, lastDash) : truncated;
+}
+
+/**
  * Render the initial (empty) `index.md` body.
  * Every category is shown, empty ones marked "(none yet)".
  */
@@ -363,7 +374,8 @@ export function writePage(
   }
 
   // Overview is a single fixed file; all other types use `{id}.md`.
-  const filename = type === "overview" ? "overview.md" : `${page.id}.md`;
+  const safeId = truncateSlug(page.id);
+  const filename = type === "overview" ? "overview.md" : `${safeId}.md`;
   const relFilepath = toPosix(path.join(typeDir, filename));
   const fullPath = path.join(wikiDir, relFilepath);
 

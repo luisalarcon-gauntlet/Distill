@@ -49,7 +49,7 @@ const SYSTEM_PROMPT = `You are a knowledge wiki compiler. Your job is to take ac
 
 Rules:
 - Every page must use [[Page Title]] syntax to link to other pages in the wiki
-- Page IDs must be kebab-case slugs (e.g., "attention-mechanism")
+- Page IDs must be kebab-case slugs, maximum 50 characters. Truncate long titles to their key phrase (e.g., "intro-cs-programming-python" not "introduction-to-cs-and-programming-using-python")
 - Content should be substantive: 3-6 paragraphs per page, with real technical detail
 - Cross-reference heavily — the value is in the connections
 - Flag contradictions or tensions between papers explicitly
@@ -480,7 +480,7 @@ Rules:
 - Produce 3-8 concept pages (type: "concept") for the most important recurring ideas across lectures. Each concept page must name the [[Lecture pages]] that introduce it, and must cross-link to related concepts.
 - Produce 1 source page (type: "source") for each classified PDF whose type is "problem-set" or "exam". Each source page must link back to ../raw/pdfs/<filename> similarly.
 - Every page should carry [[Wiki Links]] wherever another page is referenced. Be generous with cross-references — the value is in the connections.
-- Page IDs are kebab-case slugs (e.g. "lecture-5-dynamic-programming", "attention-mechanism").
+- Page IDs are kebab-case slugs, maximum 50 characters (e.g. "lecture-5-dynamic-programming", "attention-mechanism"). Truncate long titles to their key phrase.
 - If courseInfo.units is empty (no syllabus available), infer lecture order purely from classification.lectureNumber, still placing null lectureNumbers last.
 
 Return ONLY valid JSON matching this shape, no markdown fences:
