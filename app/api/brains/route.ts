@@ -7,6 +7,18 @@ import {
 import { initWikiDir, appendLog } from "@/lib/wiki-fs";
 import { searchAllSources } from "@/lib/papers";
 import path from "path";
+import os from "os";
+
+const ALLOWED_ROOTS = (process.env.BROWSE_ALLOWED_ROOTS || os.homedir())
+  .split(":")
+  .map((r) => path.resolve(r));
+
+function isPathAllowed(p: string): boolean {
+  const resolved = path.resolve(p);
+  return ALLOWED_ROOTS.some(
+    (root) => resolved === root || resolved.startsWith(root + path.sep)
+  );
+}
 
 export async function GET() {
   try {
@@ -52,6 +64,13 @@ export async function POST(request: Request) {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
     const brainPath = path.join(directory, slug);
+
+    if (!isPathAllowed(brainPath)) {
+      return NextResponse.json(
+        { error: "Brain path must be inside an allowed directory" },
+        { status: 403 }
+      );
+    }
 
     // Initialize the wiki folder structure on disk.
     initWikiDir(brainPath, searchTopic);
