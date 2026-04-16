@@ -1,8 +1,8 @@
 # Distill
 
-**Type a research topic. Get an interlinked wiki of the field, built from real papers, on your filesystem.**
+**Type a research topic — or upload course PDFs. Get an interlinked wiki of the field, built from real papers and documents, on your filesystem.**
 
-Distill searches Semantic Scholar, arXiv, and OpenAlex for papers on your topic, lets you curate which ones to include, then uses an LLM to compile them into a structured, cross-referenced wiki — overviews, concept breakdowns, entity profiles, source summaries — all as real `.md` files you can open in Obsidian or any editor.
+Distill searches Semantic Scholar, arXiv, and OpenAlex for papers on your topic, lets you curate which ones to include, then uses an LLM to compile them into a structured, cross-referenced wiki — overviews, concept breakdowns, entity profiles, source summaries — all as real `.md` files you can open in Obsidian or any editor. You can also upload PDFs (syllabi, lectures, readings) and Distill will classify them, extract a course structure, and compile a curriculum wiki.
 
 Built on the [compiled wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) described by Andrej Karpathy.
 
@@ -32,7 +32,7 @@ The result: your knowledge base gets richer over time instead of resetting to ze
 
 | | ChatGPT / NotebookLM | Elicit | Distill |
 |---|---|---|---|
-| Paper search | Manual upload | Built-in search | Built-in, 3 sources in parallel |
+| Paper search | Manual upload | Built-in search | Built-in, 3 sources in parallel + PDF upload |
 | Knowledge persistence | None — answer and forget | Table of summaries | Persistent interlinked wiki |
 | Cross-references | None | None | Auto-generated `[[Wiki Links]]` |
 | Output format | Chat messages | Spreadsheet rows | Real `.md` files on your filesystem |
@@ -71,6 +71,7 @@ Hit compile and the LLM reads every selected paper's abstract and metadata, then
 - **Concept pages** — one per key idea, technique, or method. Explains what it is, why it matters, and how it connects to other concepts
 - **Entity pages** — specific models, datasets, systems, or organizations
 - **Source summaries** — each paper's key contributions, methods, findings, and significance
+- **Lecture pages** — when created from uploaded course PDFs, one per lecture covering its content and connections
 
 Every page uses `[[Wiki Links]]` to reference other pages. The overview links to all concepts and entities. Concept pages link to each other. Source summaries link to the concepts they discuss. The result is a navigable knowledge graph, not a flat list.
 
@@ -96,7 +97,8 @@ my-research-topic/
 ├── README.md              # orientation for Obsidian users
 ├── raw/                   # immutable source documents
 │   ├── vaswani-2017.md
-│   └── devlin-2019.md
+│   ├── devlin-2019.md
+│   └── pdfs/              # uploaded PDF files
 ├── wiki/                  # LLM-generated pages
 │   ├── overview.md
 │   ├── concepts/
@@ -107,6 +109,7 @@ my-research-topic/
 │   ├── sources/
 │   │   ├── vaswani-2017-summary.md
 │   │   └── devlin-2019-summary.md
+│   ├── lectures/           # lecture pages (from uploaded PDFs)
 │   └── analyses/
 ├── exports/
 └── .obsidian/             # vault config for Obsidian
@@ -117,6 +120,7 @@ No database. No cloud. Just files you own.
 ## Features
 
 - **Three academic sources** — Semantic Scholar, arXiv, and OpenAlex searched in parallel and deduplicated
+- **PDF upload** — upload syllabi, lectures, and readings to create a curriculum wiki, or add PDFs to an existing brain
 - **Paper curation** — review and select papers before the LLM touches anything
 - **Interlinked wiki pages** — `[[Wiki Links]]` throughout, cross-referenced automatically
 - **Obsidian-ready** — auto-generates vault config, page aliases, and graph color-coding by page type
@@ -143,8 +147,9 @@ Distill uses whichever key is set. Prefers Anthropic if both are present.
 ## Tech Stack
 
 - **Next.js 14** — App Router, API routes, React frontend
-- **TypeScript + Tailwind CSS** — ~2,500 lines of code
+- **TypeScript + Tailwind CSS** — ~6,800 lines of code
 - **Markdown + gray-matter** — real `.md` files with YAML frontmatter, no database
+- **pdf-parse** — PDF text extraction for uploaded documents
 - **Semantic Scholar + arXiv + OpenAlex** — free academic paper search, no auth required
 - **Anthropic / OpenAI** — BYO key, provider abstraction via raw fetch
 
@@ -155,7 +160,6 @@ Distill is open source and contributions are welcome.
 **Good first contributions:**
 - Bug fixes and error handling improvements
 - New paper source integrations (Google Scholar, PubMed, DBLP)
-- PDF upload and parsing
 - Better wiki link resolution and navigation
 - UI improvements and accessibility
 
@@ -163,7 +167,7 @@ Distill is open source and contributions are welcome.
 1. Fork the repo
 2. Create a branch (`git checkout -b fix/your-fix`)
 3. Make your changes
-4. Run the tests (`npm test` — 210 tests should pass)
+4. Run the tests (`npm test` — 251 tests should pass)
 5. Open a PR with a clear description of what you changed and why
 
 **Before submitting:**
@@ -174,7 +178,8 @@ Distill is open source and contributions are welcome.
 **Project structure:**
 - `lib/papers.ts` — paper search across three backends, dedup, relevance filtering
 - `lib/llm.ts` — LLM provider abstraction (Anthropic + OpenAI)
-- `lib/compiler.ts` — the wiki compiler: compile, ingest, and lint prompts
+- `lib/compiler.ts` — the wiki compiler: compile, ingest, lint, and curriculum compilation prompts
+- `lib/pdf.ts` — PDF text extraction (pdf-parse)
 - `lib/wiki-fs.ts` — filesystem layer: read/write pages, index, log, token tracking
 - `lib/config.ts` — brain registry at `~/.distill/config.json`
 - `app/api/` — Next.js API routes
@@ -182,7 +187,7 @@ Distill is open source and contributions are welcome.
 
 ## Roadmap
 
-- [ ] PDF upload + ingestion
+- [x] PDF upload + ingestion
 - [ ] Google Scholar integration
 - [ ] Ollama / local model support
 - [ ] Citation graph visualization
