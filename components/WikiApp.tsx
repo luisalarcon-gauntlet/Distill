@@ -42,7 +42,7 @@ interface Paper {
   arxivId?: string;
 }
 
-type TokenOperation = "compile" | "ingest" | "query" | "lint";
+type TokenOperation = "compile" | "ingest" | "query" | "lint" | "flashcard" | "exam-prep";
 
 interface OperationBreakdown {
   input: number;
@@ -62,7 +62,51 @@ interface TokenSummary {
   provider: string;
 }
 
-type Screen = "brains" | "create" | "review" | "loading" | "upload-loading" | "wiki";
+interface Flashcard {
+  id: string;
+  question: string;
+  answer: string;
+  pageSource: string;
+  pageTitle: string;
+  created: string;
+  lastReviewed: string | null;
+  confidence: number;
+  reviewCount: number;
+  streak: number;
+}
+
+interface ExamPrepSession {
+  id: string;
+  title: string;
+  examDate: string;
+  created: string;
+  updated: string;
+  scope: string[];
+  conceptChecklist: Array<{
+    concept: string;
+    pageId: string | null;
+    mastery: "not-started" | "weak" | "developing" | "strong";
+    notes: string;
+  }>;
+  studyPlan: Array<{
+    date: string;
+    topics: string[];
+    flashcardTarget: number;
+    completed: boolean;
+  }>;
+  practiceQuestions: Array<{
+    id: string;
+    question: string;
+    expectedAnswer: string;
+    difficulty: "easy" | "medium" | "hard";
+    relatedConcepts: string[];
+    attempted: boolean;
+    userAnswer: string | null;
+  }>;
+  status: "active" | "completed" | "archived";
+}
+
+type Screen = "brains" | "create" | "review" | "loading" | "upload-loading" | "wiki" | "flashcard-review" | "exam-prep";
 
 interface UploadStep {
   message: string;
@@ -276,8 +320,12 @@ function WikiGraph({
 function PageView({
   page,
   onNavigate,
+  onGenerateFlashcards,
+  flashcardGenerating,
 }: {
   page: WikiPage;
+  onGenerateFlashcards?: () => void;
+  flashcardGenerating?: boolean;
   onNavigate: (t: string) => void;
 }) {
   const typeColor: Record<string, string> = {
@@ -431,6 +479,25 @@ function PageView({
           </div>
         </div>
       )}
+
+      {onGenerateFlashcards && (
+        <div className="mt-4 pt-4" style={{ borderTop: "1px solid #1e1e2e" }}>
+          <button
+            onClick={onGenerateFlashcards}
+            disabled={flashcardGenerating}
+            style={{
+              padding: "6px 14px", borderRadius: 6,
+              fontFamily: "IBM Plex Mono", fontSize: 11,
+              color: flashcardGenerating ? "#4a4a5c" : "#c4a1ff",
+              background: flashcardGenerating ? "rgba(74,74,92,0.1)" : "rgba(196,161,255,0.1)",
+              border: `1px solid ${flashcardGenerating ? "rgba(74,74,92,0.2)" : "rgba(196,161,255,0.2)"}`,
+              cursor: flashcardGenerating ? "default" : "pointer",
+            }}
+          >
+            {flashcardGenerating ? "Generating..." : "Generate Flashcards for This Page"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -513,6 +580,22 @@ export default function WikiApp() {
   const [tokenSummary, setTokenSummary] = useState<TokenSummary | null>(null);
   const [tokenStatsOpen, setTokenStatsOpen] = useState(false);
 
+  // Flashcard state
+  const [flashcards, setFlashcards] = useState<Flashcard[]>([]);
+  const [flashcardGenerating, setFlashcardGenerating] = useState(false);
+  const [flashcardReviewIndex, setFlashcardReviewIndex] = useState(0);
+  const [flashcardFlipped, setFlashcardFlipped] = useState(false);
+
+  // Exam prep state
+  const [examSessions, setExamSessions] = useState<ExamPrepSession[]>([]);
+  const [activeExamSession, setActiveExamSession] = useState<ExamPrepSession | null>(null);
+  const [examPrepGenerating, setExamPrepGenerating] = useState(false);
+  const [examCreateTitle, setExamCreateTitle] = useState("");
+  const [examCreateDate, setExamCreateDate] = useState("");
+  const [examCreateScope, setExamCreateScope] = useState<Set<string>>(new Set());
+  const [examPrepTab, setExamPrepTab] = useState<"checklist" | "plan" | "practice">("checklist");
+  const [showExamCreatePanel, setShowExamCreatePanel] = useState(false);
+
   // Load brains on mount
   useEffect(() => {
     loadBrains();
@@ -539,6 +622,22 @@ export default function WikiApp() {
     }
   }, []);
 
+  const loadFlashcards = useCallback(async (brainId: string) => {
+    try {
+      const res = await fetch(`/api/brains/${brainId}/flashcards`);
+      const data = await res.json();
+      if (!data.error) setFlashcards(data.cards || []);
+    } catch { /* non-fatal */ }
+  }, []);
+
+  const loadExamSessions = useCallback(async (brainId: string) => {
+    try {
+      const res = await fetch(`/api/brains/${brainId}/exam-prep`);
+      const data = await res.json();
+      if (!data.error) setExamSessions(Array.isArray(data) ? data : []);
+    } catch { /* non-fatal */ }
+  }, []);
+
   const loadBrain = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/brains/${id}`);
@@ -551,10 +650,12 @@ export default function WikiApp() {
       setActivePage(overview?.id || data.pages?.[0]?.id || null);
       setScreen("wiki");
       loadTokenSummary(id);
+      loadFlashcards(id);
+      loadExamSessions(id);
     } catch (e: any) {
       setError(e.message);
     }
-  }, [loadTokenSummary]);
+  }, [loadTokenSummary, loadFlashcards, loadExamSessions]);
 
   const browseTo = useCallback(async (dirPath?: string) => {
     try {
@@ -1043,6 +1144,105 @@ export default function WikiApp() {
     if (!activeBrain) return;
     window.open(`/api/brains/${activeBrain.id}/export`, "_blank");
   }, [activeBrain]);
+
+  // ─── Flashcard handlers ───
+
+  const handleGenerateFlashcards = useCallback(async (pageId?: string) => {
+    if (!activeBrain) return;
+    setFlashcardGenerating(true);
+    try {
+      const res = await fetch(`/api/brains/${activeBrain.id}/flashcards`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pageId, count: pageId ? 8 : 30 }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      await loadFlashcards(activeBrain.id);
+      loadTokenSummary(activeBrain.id);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setFlashcardGenerating(false);
+    }
+  }, [activeBrain, loadFlashcards, loadTokenSummary]);
+
+  const handleFlashcardReview = useCallback(async (cardId: string, confidence: number) => {
+    if (!activeBrain) return;
+    try {
+      await fetch(`/api/brains/${activeBrain.id}/flashcards/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cardId, confidence }),
+      });
+      setFlashcards(prev => prev.map(c =>
+        c.id === cardId
+          ? { ...c, lastReviewed: new Date().toISOString(), confidence, reviewCount: c.reviewCount + 1, streak: confidence >= 2 ? c.streak + 1 : 0 }
+          : c
+      ));
+      setFlashcardFlipped(false);
+      setFlashcardReviewIndex(prev => prev + 1);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }, [activeBrain]);
+
+  const handleExportFlashcardsCSV = useCallback(() => {
+    if (!activeBrain) return;
+    window.open(`/api/brains/${activeBrain.id}/flashcards/export`, "_blank");
+  }, [activeBrain]);
+
+  const startFlashcardReview = useCallback(() => {
+    setFlashcardReviewIndex(0);
+    setFlashcardFlipped(false);
+    setScreen("flashcard-review");
+  }, []);
+
+  // ─── Exam prep handlers ───
+
+  const handleCreateExamPrep = useCallback(async () => {
+    if (!activeBrain || !examCreateTitle.trim() || !examCreateDate) return;
+    setExamPrepGenerating(true);
+    try {
+      const res = await fetch(`/api/brains/${activeBrain.id}/exam-prep`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: examCreateTitle,
+          examDate: examCreateDate,
+          scope: Array.from(examCreateScope),
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setActiveExamSession(data);
+      await loadExamSessions(activeBrain.id);
+      loadTokenSummary(activeBrain.id);
+      setExamPrepTab("checklist");
+      setScreen("exam-prep");
+      setShowExamCreatePanel(false);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setExamPrepGenerating(false);
+    }
+  }, [activeBrain, examCreateTitle, examCreateDate, examCreateScope, loadExamSessions, loadTokenSummary]);
+
+  const handleUpdateExamSession = useCallback(async (update: Record<string, unknown>) => {
+    if (!activeBrain || !activeExamSession) return;
+    try {
+      const res = await fetch(`/api/brains/${activeBrain.id}/exam-prep/${activeExamSession.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(update),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setActiveExamSession(data);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }, [activeBrain, activeExamSession]);
 
   const handleNavigate = useCallback(
     (target: string) => {
@@ -2393,6 +2593,302 @@ export default function WikiApp() {
     );
   }
 
+  // ─── FLASHCARD REVIEW ───
+  if (screen === "flashcard-review") {
+    const reviewCards = flashcards;
+    const currentCard = reviewCards[flashcardReviewIndex];
+    const isFinished = flashcardReviewIndex >= reviewCards.length;
+
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: "#0a0a0f", color: "#e0dfe6" }}>
+        <div style={{ maxWidth: 520, width: "100%" }}>
+          <div className="flex items-center justify-between" style={{ marginBottom: 32 }}>
+            <button
+              onClick={() => setScreen("wiki")}
+              style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: "#7a7a8c", background: "none", border: "none", cursor: "pointer" }}
+            >
+              &larr; Back to Wiki
+            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => { setFlashcardReviewIndex(prev => Math.max(0, prev - 1)); setFlashcardFlipped(false); }}
+                disabled={flashcardReviewIndex === 0}
+                style={{
+                  fontFamily: "IBM Plex Mono", fontSize: 14, background: "none", border: "none",
+                  color: flashcardReviewIndex === 0 ? "#2a2a3e" : "#7a7a8c", cursor: flashcardReviewIndex === 0 ? "default" : "pointer",
+                }}
+              >
+                &larr;
+              </button>
+              <span style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: "#7a7a8c" }}>
+                {Math.min(flashcardReviewIndex + 1, reviewCards.length)} / {reviewCards.length}
+              </span>
+              <button
+                onClick={() => { setFlashcardReviewIndex(prev => Math.min(reviewCards.length, prev + 1)); setFlashcardFlipped(false); }}
+                disabled={flashcardReviewIndex >= reviewCards.length}
+                style={{
+                  fontFamily: "IBM Plex Mono", fontSize: 14, background: "none", border: "none",
+                  color: flashcardReviewIndex >= reviewCards.length ? "#2a2a3e" : "#7a7a8c",
+                  cursor: flashcardReviewIndex >= reviewCards.length ? "default" : "pointer",
+                }}
+              >
+                &rarr;
+              </button>
+            </div>
+          </div>
+
+          {isFinished ? (
+            <div style={{ textAlign: "center", padding: "64px 0" }}>
+              <div style={{ fontSize: 24, color: "#7ec99a", marginBottom: 8 }}>Session Complete</div>
+              <div style={{ fontSize: 14, color: "#7a7a8c" }}>Reviewed {reviewCards.length} cards</div>
+              <button
+                onClick={() => setScreen("wiki")}
+                style={{
+                  marginTop: 24, padding: "8px 20px", borderRadius: 6,
+                  fontFamily: "IBM Plex Mono", fontSize: 12, color: "#0a0a0f",
+                  background: "#c4a1ff", border: "none", cursor: "pointer",
+                }}
+              >
+                Return to Wiki
+              </button>
+            </div>
+          ) : currentCard ? (
+            <div style={{ padding: 24, borderRadius: 12, background: "#12121a", border: "1px solid #1e1e2e" }}>
+              <div style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#4a4a5c", marginBottom: 16 }}>
+                from: {currentCard.pageTitle}
+              </div>
+              <div style={{ fontSize: 16, color: "#e0dfe6", lineHeight: 1.6, marginBottom: 24 }}>
+                {currentCard.question}
+              </div>
+
+              {!flashcardFlipped ? (
+                <button
+                  onClick={() => setFlashcardFlipped(true)}
+                  style={{
+                    width: "100%", padding: "12px 0", borderRadius: 6,
+                    fontFamily: "IBM Plex Mono", fontSize: 13, color: "#c4a1ff",
+                    background: "rgba(196,161,255,0.1)", border: "1px solid rgba(196,161,255,0.2)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Show Answer
+                </button>
+              ) : (
+                <>
+                  <div style={{ borderTop: "1px solid #1e1e2e", paddingTop: 16, marginBottom: 24 }}>
+                    <div style={{ fontSize: 14, color: "#b0afba", lineHeight: 1.7 }}>
+                      {currentCard.answer}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    {[
+                      { label: "Again", value: 0, color: "#d46a6a" },
+                      { label: "Hard", value: 1, color: "#d4a855" },
+                      { label: "Good", value: 2, color: "#90c4ff" },
+                      { label: "Easy", value: 3, color: "#7ec99a" },
+                    ].map(({ label, value, color }) => (
+                      <button
+                        key={value}
+                        onClick={() => handleFlashcardReview(currentCard.id, value)}
+                        className="flex-1"
+                        style={{
+                          padding: "10px 0", borderRadius: 6,
+                          fontFamily: "IBM Plex Mono", fontSize: 12, color,
+                          background: `${color}15`, border: `1px solid ${color}30`,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── EXAM PREP SCREEN ───
+  if (screen === "exam-prep" && activeExamSession) {
+    const today = new Date().toISOString().split("T")[0];
+    const daysUntil = Math.max(0, Math.ceil(
+      (new Date(activeExamSession.examDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+    ));
+    const masteryColors: Record<string, string> = {
+      "not-started": "#4a4a5c", weak: "#d46a6a", developing: "#d4a855", strong: "#7ec99a",
+    };
+
+    return (
+      <div className="min-h-screen" style={{ background: "#0a0a0f", color: "#e0dfe6" }}>
+        <div style={{ maxWidth: 800, margin: "0 auto", padding: "32px 24px" }}>
+          {/* Header */}
+          <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
+            <button
+              onClick={() => setScreen("wiki")}
+              style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: "#7a7a8c", background: "none", border: "none", cursor: "pointer" }}
+            >
+              &larr; Back to Wiki
+            </button>
+            <div style={{ fontFamily: "IBM Plex Mono", fontSize: 13, color: daysUntil <= 3 ? "#d46a6a" : "#d4a855" }}>
+              {daysUntil === 0 ? "Exam is TODAY" : `${daysUntil} day${daysUntil === 1 ? "" : "s"} until exam`}
+            </div>
+          </div>
+
+          <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 4 }}>{activeExamSession.title}</h2>
+          <div style={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#4a4a5c", marginBottom: 24 }}>
+            {activeExamSession.examDate} &middot; {activeExamSession.scope.length} pages in scope
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-0" style={{ borderBottom: "1px solid #1e1e2e", marginBottom: 24 }}>
+            {(["checklist", "plan", "practice"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setExamPrepTab(tab)}
+                style={{
+                  padding: "10px 20px", fontFamily: "IBM Plex Mono", fontSize: 12,
+                  color: examPrepTab === tab ? "#c4a1ff" : "#4a4a5c",
+                  background: "none", border: "none", cursor: "pointer",
+                  borderBottom: examPrepTab === tab ? "2px solid #c4a1ff" : "2px solid transparent",
+                  textTransform: "uppercase", letterSpacing: "0.05em",
+                }}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {/* Checklist Tab */}
+          {examPrepTab === "checklist" && (
+            <div>
+              {activeExamSession.conceptChecklist.map((item, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-3"
+                  style={{
+                    padding: "10px 12px", borderRadius: 6, marginBottom: 4,
+                    background: "rgba(18,18,26,0.5)", border: "1px solid #1e1e2e",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => {
+                    const levels: Array<"not-started" | "weak" | "developing" | "strong"> = ["not-started", "weak", "developing", "strong"];
+                    const nextIdx = (levels.indexOf(item.mastery) + 1) % levels.length;
+                    const updated = [...activeExamSession.conceptChecklist];
+                    updated[i] = { ...item, mastery: levels[nextIdx] };
+                    handleUpdateExamSession({ conceptChecklist: updated });
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 10, height: 10, borderRadius: "50%",
+                      background: masteryColors[item.mastery] || "#4a4a5c",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ fontSize: 14, flex: 1 }}>{item.concept}</span>
+                  <span style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: masteryColors[item.mastery] || "#4a4a5c" }}>
+                    {item.mastery}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Plan Tab */}
+          {examPrepTab === "plan" && (
+            <div>
+              {activeExamSession.studyPlan.map((day, i) => {
+                const isToday = day.date === today;
+                const isPast = day.date < today;
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      padding: "12px 14px", borderRadius: 6, marginBottom: 4,
+                      background: isToday ? "rgba(196,161,255,0.06)" : "rgba(18,18,26,0.5)",
+                      border: isToday ? "1px solid rgba(196,161,255,0.3)" : "1px solid #1e1e2e",
+                      opacity: isPast && day.completed ? 0.5 : 1,
+                    }}
+                  >
+                    <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
+                      <span style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: isToday ? "#c4a1ff" : "#7a7a8c" }}>
+                        {day.date} {isToday && "(today)"}
+                      </span>
+                      <button
+                        onClick={() => handleUpdateExamSession({ studyPlanDayIndex: i, completed: !day.completed })}
+                        style={{
+                          fontFamily: "IBM Plex Mono", fontSize: 11, background: "none", border: "none",
+                          color: day.completed ? "#7ec99a" : "#4a4a5c", cursor: "pointer",
+                        }}
+                      >
+                        {day.completed ? "\u2713 Done" : "Mark done"}
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 13, marginBottom: 4 }}>
+                      {day.topics.join(", ")}
+                    </div>
+                    <div style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#4a4a5c" }}>
+                      Flashcard target: {day.flashcardTarget}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Practice Tab */}
+          {examPrepTab === "practice" && (
+            <div>
+              {activeExamSession.practiceQuestions.map((q, i) => (
+                <div
+                  key={q.id}
+                  style={{
+                    padding: "14px", borderRadius: 6, marginBottom: 8,
+                    background: "rgba(18,18,26,0.5)", border: "1px solid #1e1e2e",
+                  }}
+                >
+                  <div className="flex items-center gap-2" style={{ marginBottom: 8 }}>
+                    <span style={{
+                      fontFamily: "IBM Plex Mono", fontSize: 10, padding: "2px 6px",
+                      borderRadius: 4, color: "#0a0a0f",
+                      background: q.difficulty === "easy" ? "#7ec99a" : q.difficulty === "medium" ? "#d4a855" : "#d46a6a",
+                    }}>
+                      {q.difficulty}
+                    </span>
+                    <span style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#4a4a5c" }}>
+                      Q{i + 1}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 14, lineHeight: 1.6, marginBottom: 12 }}>{q.question}</div>
+                  {q.attempted ? (
+                    <div style={{ borderTop: "1px solid #1e1e2e", paddingTop: 10 }}>
+                      <div style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#4a4a5c", marginBottom: 4 }}>Expected answer:</div>
+                      <div style={{ fontSize: 13, color: "#b0afba", lineHeight: 1.6 }}>{q.expectedAnswer}</div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleUpdateExamSession({ practiceQuestionId: q.id, userAnswer: "(revealed)" })}
+                      style={{
+                        fontFamily: "IBM Plex Mono", fontSize: 11, color: "#90c4ff",
+                        background: "rgba(144,196,255,0.1)", border: "1px solid rgba(144,196,255,0.2)",
+                        padding: "6px 12px", borderRadius: 6, cursor: "pointer",
+                      }}
+                    >
+                      Show Answer
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ─── WIKI VIEWER ───
   const currentPage = pages.find((p) => p.id === activePage) || null;
   const typeOrder: Record<string, number> = {
@@ -2428,6 +2924,10 @@ export default function WikiApp() {
               setPages([]);
               setQueryAnswer(null);
               setLintResult(null);
+              setFlashcards([]);
+              setExamSessions([]);
+              setActiveExamSession(null);
+              setShowExamCreatePanel(false);
             }}
             className="mb-1"
             style={{
@@ -2739,6 +3239,71 @@ export default function WikiApp() {
             }}
           >
             Export
+          </button>
+        </div>
+
+        {/* Flashcard & Exam Prep buttons */}
+        <div className="flex gap-1.5 px-3 pb-3" style={{ borderBottom: "1px solid #1e1e2e" }}>
+          <button
+            onClick={() => handleGenerateFlashcards()}
+            disabled={flashcardGenerating}
+            className="flex-1 py-1.5 rounded"
+            style={{
+              fontFamily: "IBM Plex Mono",
+              fontSize: 11,
+              color: "#c4a1ff",
+              background: "rgba(196,161,255,0.1)",
+              border: "1px solid rgba(196,161,255,0.2)",
+              cursor: "pointer",
+            }}
+          >
+            {flashcardGenerating ? "Generating..." : "Flashcards"}
+          </button>
+          {flashcards.length > 0 && (
+            <button
+              onClick={startFlashcardReview}
+              className="flex-1 py-1.5 rounded"
+              style={{
+                fontFamily: "IBM Plex Mono",
+                fontSize: 11,
+                color: "#90c4ff",
+                background: "rgba(144,196,255,0.1)",
+                border: "1px solid rgba(144,196,255,0.2)",
+                cursor: "pointer",
+              }}
+            >
+              Review ({flashcards.length})
+            </button>
+          )}
+          {flashcards.length > 0 && (
+            <button
+              onClick={handleExportFlashcardsCSV}
+              className="py-1.5 px-2 rounded"
+              style={{
+                fontFamily: "IBM Plex Mono",
+                fontSize: 11,
+                color: "#7ec99a",
+                background: "rgba(126,201,154,0.1)",
+                border: "1px solid rgba(126,201,154,0.2)",
+                cursor: "pointer",
+              }}
+            >
+              Export
+            </button>
+          )}
+          <button
+            onClick={() => setShowExamCreatePanel(true)}
+            className="flex-1 py-1.5 rounded"
+            style={{
+              fontFamily: "IBM Plex Mono",
+              fontSize: 11,
+              color: "#d4a855",
+              background: "rgba(212,168,85,0.1)",
+              border: "1px solid rgba(212,168,85,0.2)",
+              cursor: "pointer",
+            }}
+          >
+            Exam Prep
           </button>
         </div>
 
@@ -3122,10 +3687,129 @@ export default function WikiApp() {
           </div>
         )}
 
+        {/* Exam prep creation panel */}
+        {showExamCreatePanel && (
+          <div
+            className="mx-12 mt-4 p-4 rounded-lg"
+            style={{
+              background: "rgba(212,168,85,0.05)",
+              border: "1px solid rgba(212,168,85,0.15)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <span
+                className="uppercase tracking-widest"
+                style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#d4a855" }}
+              >
+                Exam Prep
+              </span>
+              <button
+                onClick={() => setShowExamCreatePanel(false)}
+                style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: "#4a4a5c", background: "none", border: "none", cursor: "pointer" }}
+              >
+                x
+              </button>
+            </div>
+
+            <div className="flex gap-2 mb-3">
+              <input
+                value={examCreateTitle}
+                onChange={(e) => setExamCreateTitle(e.target.value)}
+                placeholder="Exam title (e.g. Midterm 1)"
+                className="flex-1 outline-none"
+                style={{
+                  padding: "8px 12px", fontSize: 13, color: "#e0dfe6",
+                  background: "#12121a", border: "1px solid #1e1e2e", borderRadius: 6,
+                }}
+              />
+              <input
+                type="date"
+                value={examCreateDate}
+                onChange={(e) => setExamCreateDate(e.target.value)}
+                className="outline-none"
+                style={{
+                  padding: "8px 12px", fontSize: 13, color: "#e0dfe6",
+                  background: "#12121a", border: "1px solid #1e1e2e", borderRadius: 6,
+                }}
+              />
+            </div>
+
+            <div style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#4a4a5c", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Select pages in scope
+            </div>
+            <div style={{ maxHeight: 200, overflow: "auto", marginBottom: 12 }}>
+              {pages.filter(p => p.type !== "analysis").map((p) => (
+                <label
+                  key={p.id}
+                  className="flex items-center gap-2 cursor-pointer"
+                  style={{ padding: "4px 0", fontSize: 13 }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={examCreateScope.has(p.id)}
+                    onChange={() => {
+                      setExamCreateScope(prev => {
+                        const next = new Set(prev);
+                        if (next.has(p.id)) next.delete(p.id);
+                        else next.add(p.id);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span style={{ color: "#e0dfe6" }}>{p.title}</span>
+                  <span style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#4a4a5c" }}>({p.type})</span>
+                </label>
+              ))}
+            </div>
+
+            <button
+              onClick={handleCreateExamPrep}
+              disabled={examPrepGenerating || !examCreateTitle.trim() || !examCreateDate || examCreateScope.size === 0}
+              style={{
+                padding: "8px 16px", borderRadius: 6,
+                fontFamily: "IBM Plex Mono", fontSize: 12,
+                color: "#0a0a0f",
+                background: examPrepGenerating ? "#4a4a5c" : "#d4a855",
+                border: "none", cursor: "pointer",
+              }}
+            >
+              {examPrepGenerating ? "Generating Study Plan..." : "Generate Study Plan"}
+            </button>
+
+            {/* Existing exam sessions */}
+            {examSessions.length > 0 && (
+              <div style={{ marginTop: 12, borderTop: "1px solid #1e1e2e", paddingTop: 12 }}>
+                <div style={{ fontFamily: "IBM Plex Mono", fontSize: 10, color: "#4a4a5c", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Existing sessions
+                </div>
+                {examSessions.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => { setActiveExamSession(s); setScreen("exam-prep"); }}
+                    className="block w-full text-left"
+                    style={{
+                      padding: "6px 8px", marginBottom: 2, borderRadius: 4,
+                      fontFamily: "IBM Plex Mono", fontSize: 12, color: "#90c4ff",
+                      background: "rgba(144,196,255,0.05)", border: "none", cursor: "pointer",
+                    }}
+                  >
+                    {s.title} &middot; {s.examDate}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Page content */}
         <div className="px-12 py-6">
           {currentPage ? (
-            <PageView page={currentPage} onNavigate={handleNavigate} />
+            <PageView
+              page={currentPage}
+              onNavigate={handleNavigate}
+              onGenerateFlashcards={() => handleGenerateFlashcards(currentPage.id)}
+              flashcardGenerating={flashcardGenerating}
+            />
           ) : (
             <div
               className="text-center py-20"

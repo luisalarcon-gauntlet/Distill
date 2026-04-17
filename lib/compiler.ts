@@ -32,6 +32,30 @@ export interface CurriculumStructure {
 
 const ZERO_USAGE: TokenUsage = { input_tokens: 0, output_tokens: 0 };
 
+/**
+ * Truncate extracted PDF text to a character budget.
+ * Truncates at word boundary, detects garbage extraction output.
+ */
+export function budgetText(raw: string, maxChars: number): string {
+  const text = (raw || "").trim();
+  if (text.length === 0) return "(no text extracted)";
+
+  // Garbage detection: if >30% non-printable chars, extraction likely failed
+  const nonPrintable = text.replace(/[\x20-\x7E\n\r\t\u00A0-\uFFFF]/g, "");
+  if (nonPrintable.length / text.length > 0.3) {
+    return "(PDF text extraction produced unreadable output)";
+  }
+
+  if (text.length <= maxChars) return text;
+
+  let truncated = text.slice(0, maxChars);
+  const lastSpace = truncated.lastIndexOf(" ");
+  if (lastSpace > maxChars * 0.8) {
+    truncated = truncated.slice(0, lastSpace);
+  }
+  return truncated + "\n[truncated]";
+}
+
 interface CompilerPage {
   id: string;
   title: string;
@@ -209,6 +233,238 @@ Look for:
     suggestions: string[];
   }>(SYSTEM_PROMPT, prompt, 4096);
   return { result: data, usage };
+}
+
+// ─── Flashcard generation ─────────────────────────────────────────────
+
+const FLASHCARD_SYSTEM = `You are a flashcard generation expert. You create high-quality Q&A flashcards from educational content.
+
+Rules for good flashcards:
+- Each card tests ONE atomic concept (no compound questions)
+- Questions should require recall, not recognition (no true/false)
+- Answers should be concise but complete (1-3 sentences)
+- Include context in the question so it stands alone
+- Vary question types: definition, comparison, application, cause-effect, process
+- For technical concepts, include "why does this matter?" cards alongside "what is X?" cards
+
+Return ONLY valid JSON, no markdown fences.`;
+
+export async function generateFlashcards(
+  pageContent: string,
+  pageTitle: string,
+  _pageId: string,
+  count: number = 8
+): Promise<{
+  result: Array<{ question: string; answer: string }>;
+  usage: TokenUsage;
+}> {
+  const prompt = `Generate ${count} high-quality flashcards from this wiki page.
+
+Page: "${pageTitle}"
+Content:
+${pageContent}
+
+Return JSON:
+{
+  "flashcards": [
+    { "question": "...", "answer": "..." }
+  ]
+}
+
+Requirements:
+- Generate exactly ${count} cards (fewer if the content is very short)
+- Cover the most important concepts, not trivia
+- Questions should test understanding, not just recall of exact wording
+- Answers should be self-contained`;
+
+  const { data, usage } = await llmJSON<{
+    flashcards: Array<{ question: string; answer: string }>;
+  }>(FLASHCARD_SYSTEM, prompt, 4096);
+  return { result: data.flashcards || [], usage };
+}
+
+export async function generateBrainFlashcards(
+  pages: WikiPage[],
+  count: number = 30
+): Promise<{
+  result: Array<{
+    question: string;
+    answer: string;
+    pageSource: string;
+    pageTitle: string;
+  }>;
+  usage: TokenUsage;
+}> {
+  const context = pages
+    .filter((p) => p.type !== "analysis")
+    .map((p) => `## ${p.title} [${p.id}] (${p.type})\n${p.content}`)
+    .join("\n\n---\n\n");
+
+  const prompt = `Generate ${count} high-quality flashcards covering the key concepts across this entire wiki.
+
+Wiki content:
+${context}
+
+Return JSON:
+{
+  "flashcards": [
+    { "question": "...", "answer": "...", "pageSource": "page-id-from-brackets", "pageTitle": "Page Title" }
+  ]
+}
+
+Requirements:
+- Distribute cards across all major topics proportionally
+- Cover the most important concepts from each section
+- Use the pageSource field to indicate which wiki page each card is derived from (use the page ID from the brackets)
+- Prioritize conceptual understanding over trivial facts`;
+
+  const { data, usage } = await llmJSON<{
+    flashcards: Array<{
+      question: string;
+      answer: string;
+      pageSource: string;
+      pageTitle: string;
+    }>;
+  }>(FLASHCARD_SYSTEM, prompt, 8192);
+  return { result: data.flashcards || [], usage };
+}
+
+// ─── Exam prep generation ─────────────────────────────────────────────
+
+const EXAM_PREP_SYSTEM = `You are an exam preparation expert. You create structured study plans, concept checklists, and practice questions tailored to a student's exam scope and timeline.
+
+Rules:
+- Prioritize concepts by importance and interconnection (foundational concepts first)
+- Study plans should be realistic — don't schedule 8 hours of study per day
+- Practice questions should mirror real exam formats (short answer, explain, compare, apply)
+- Vary difficulty: 30% easy (definitions), 40% medium (application), 30% hard (synthesis/analysis)
+
+Return ONLY valid JSON, no markdown fences.`;
+
+export async function generateExamPrep(
+  pages: WikiPage[],
+  flashcardDeck: {
+    cards: Array<{
+      pageSource: string;
+      confidence: number;
+      reviewCount: number;
+    }>;
+  },
+  examTitle: string,
+  examDate: string,
+  scopePageIds: string[]
+): Promise<{
+  result: {
+    conceptChecklist: Array<{
+      concept: string;
+      pageId: string | null;
+      mastery: "not-started" | "weak" | "developing" | "strong";
+      notes: string;
+    }>;
+    studyPlan: Array<{
+      date: string;
+      topics: string[];
+      flashcardTarget: number;
+      completed: boolean;
+    }>;
+    practiceQuestions: Array<{
+      question: string;
+      expectedAnswer: string;
+      difficulty: "easy" | "medium" | "hard";
+      relatedConcepts: string[];
+    }>;
+  };
+  usage: TokenUsage;
+}> {
+  const scopePages = pages.filter((p) => scopePageIds.includes(p.id));
+  const wikiContext = scopePages
+    .map((p) => `## ${p.title} [${p.id}] (${p.type})\n${p.content}`)
+    .join("\n\n---\n\n");
+
+  const performanceSummary = scopePageIds
+    .map((pid) => {
+      const cards = flashcardDeck.cards.filter((c) => c.pageSource === pid);
+      if (cards.length === 0) return `  - ${pid}: no flashcards yet`;
+      const avgConf =
+        cards.reduce((s, c) => s + c.confidence, 0) / cards.length;
+      const reviewed = cards.filter((c) => c.reviewCount > 0).length;
+      return `  - ${pid}: ${cards.length} cards, ${reviewed} reviewed, avg confidence ${avgConf.toFixed(1)}/5`;
+    })
+    .join("\n");
+
+  const today = new Date().toISOString().split("T")[0];
+  const daysUntilExam = Math.max(
+    1,
+    Math.ceil(
+      (new Date(examDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+    )
+  );
+
+  const prompt = `Create an exam preparation plan.
+
+Exam: "${examTitle}"
+Exam Date: ${examDate} (${daysUntilExam} days from today, ${today})
+
+Scope — these wiki pages are in scope for the exam:
+${wikiContext}
+
+Flashcard performance data (indicates student's current understanding):
+${performanceSummary}
+
+Generate JSON:
+{
+  "conceptChecklist": [
+    { "concept": "Concept Name", "pageId": "wiki-page-id-or-null", "mastery": "not-started", "notes": "Why this concept matters" }
+  ],
+  "studyPlan": [
+    { "date": "YYYY-MM-DD", "topics": ["Topic 1", "Topic 2"], "flashcardTarget": 10, "completed": false }
+  ],
+  "practiceQuestions": [
+    { "question": "...", "expectedAnswer": "...", "difficulty": "easy|medium|hard", "relatedConcepts": ["Concept Name"] }
+  ]
+}
+
+Requirements:
+- conceptChecklist: list every testable concept. Set mastery based on flashcard data (high confidence + reviewed = "strong", no cards = "not-started", low confidence = "weak")
+- studyPlan: one entry per day from today to exam date. Front-load weak concepts. Taper last 1-2 days for review only. 2-4 topics per day.
+- practiceQuestions: 10-15 questions. 30% easy, 40% medium, 30% hard. Prioritize weak areas.
+- Schedule more flashcard reviews on earlier days (15-20/day) tapering to 5-10/day near the exam.`;
+
+  const { data, usage } = await llmJSON<{
+    conceptChecklist: Array<{
+      concept: string;
+      pageId: string | null;
+      mastery: string;
+      notes: string;
+    }>;
+    studyPlan: Array<{
+      date: string;
+      topics: string[];
+      flashcardTarget: number;
+      completed: boolean;
+    }>;
+    practiceQuestions: Array<{
+      question: string;
+      expectedAnswer: string;
+      difficulty: string;
+      relatedConcepts: string[];
+    }>;
+  }>(EXAM_PREP_SYSTEM, prompt, 8192);
+
+  return {
+    result: {
+      conceptChecklist: (data.conceptChecklist || []).map((c) => ({
+        ...c,
+        mastery: c.mastery as "not-started" | "weak" | "developing" | "strong",
+      })),
+      studyPlan: data.studyPlan || [],
+      practiceQuestions: (data.practiceQuestions || []).map((q) => ({
+        ...q,
+        difficulty: q.difficulty as "easy" | "medium" | "hard",
+      })),
+    },
+    usage,
+  };
 }
 
 const PDF_CLASSIFIER_SYSTEM = `You are a course-material classifier. You receive a list of PDF files — each with a filename and a short text preview — and must classify them for a curriculum builder.
@@ -519,7 +775,16 @@ export async function compileCurriculum(
   result: { pages: Record<string, CompilerPage> };
   usage: TokenUsage;
 }> {
-  const TRIM_CHARS = 2000;
+  // Dynamic per-document character budget. 100K tokens input budget is safe
+  // for both Claude 200K and GPT-4o 128K context windows.
+  const INPUT_BUDGET_CHARS = 100_000 * 4; // ~400K chars
+  const OUTPUT_TOKENS = 16_384;
+  const OVERHEAD_CHARS = 4_000; // system prompt + template + courseInfo
+  const totalPDFs = classifiedPDFs.length;
+  const maxCharsPerPDF = totalPDFs > 0
+    ? Math.floor((INPUT_BUDGET_CHARS - OVERHEAD_CHARS) / totalPDFs)
+    : 30_000;
+  const CHAR_BUDGET = Math.max(2_000, Math.min(60_000, maxCharsPerPDF));
 
   // Order lectures by lectureNumber, with nulls last, so the prompt itself
   // reflects the required ordering.
@@ -544,22 +809,22 @@ export async function compileCurriculum(
   const lectureContext = lectures
     .map((p) => {
       const c = p.classification;
-      const trimmed = (p.extractedText || "").slice(0, TRIM_CHARS);
+      const trimmed = budgetText(p.extractedText, CHAR_BUDGET);
       return `- filename: ${c.filename}
   lectureNumber: ${c.lectureNumber ?? "null"}
   title: ${c.title}
-  text preview: ${trimmed}`;
+  text content: ${trimmed}`;
     })
     .join("\n\n");
 
   const sourceContext = sourcesPDFs
     .map((p) => {
       const c = p.classification;
-      const trimmed = (p.extractedText || "").slice(0, TRIM_CHARS);
+      const trimmed = budgetText(p.extractedText, CHAR_BUDGET);
       return `- filename: ${c.filename}
   type: ${c.type}
   title: ${c.title}
-  text preview: ${trimmed}`;
+  text content: ${trimmed}`;
     })
     .join("\n\n");
 
@@ -598,7 +863,7 @@ Hard requirements:
     const response = await llmJSON<unknown>(
       CURRICULUM_COMPILER_SYSTEM,
       prompt,
-      8192
+      OUTPUT_TOKENS
     );
     usage = response.usage;
 
