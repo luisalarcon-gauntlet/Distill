@@ -158,7 +158,7 @@ export async function POST(
         title: classification.title,
         authors: [],
         year: null,
-        abstract: text.slice(0, 2000),
+        abstract: text.slice(0, 30_000),
         url: "",
         citationCount: 0,
         source_api: "semantic_scholar",

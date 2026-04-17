@@ -647,7 +647,7 @@ export function listPDFSources(
 
 // ─── Token usage tracking ──────────────────────────────────────────────
 
-export type TokenOperation = "compile" | "ingest" | "query" | "lint";
+export type TokenOperation = "compile" | "ingest" | "query" | "lint" | "flashcard" | "exam-prep";
 
 export interface TokenEvent {
   operation: TokenOperation;
@@ -799,6 +799,8 @@ export function getTokenSummary(wikiDir: string): TokenSummary {
     ingest: { input: 0, output: 0, count: 0 },
     query: { input: 0, output: 0, count: 0 },
     lint: { input: 0, output: 0, count: 0 },
+    flashcard: { input: 0, output: 0, count: 0 },
+    "exam-prep": { input: 0, output: 0, count: 0 },
   };
 
   let total_input = 0;
@@ -844,4 +846,176 @@ export function getTokenSummary(wikiDir: string): TokenSummary {
     model,
     provider,
   };
+}
+
+// ─── Flashcard types and persistence ──────────────────────────────────
+
+export interface Flashcard {
+  id: string;
+  question: string;
+  answer: string;
+  pageSource: string;
+  pageTitle: string;
+  created: string;
+  lastReviewed: string | null;
+  confidence: number;
+  reviewCount: number;
+  streak: number;
+}
+
+export interface FlashcardDeck {
+  brainId: string;
+  created: string;
+  updated: string;
+  cards: Flashcard[];
+}
+
+function flashcardsPath(wikiDir: string): string {
+  return path.join(wikiDir, "flashcards.json");
+}
+
+export function readFlashcards(wikiDir: string): FlashcardDeck {
+  const fp = flashcardsPath(wikiDir);
+  if (!fs.existsSync(fp)) {
+    return {
+      brainId: "",
+      created: new Date().toISOString(),
+      updated: new Date().toISOString(),
+      cards: [],
+    };
+  }
+  try {
+    return JSON.parse(fs.readFileSync(fp, "utf-8"));
+  } catch {
+    return {
+      brainId: "",
+      created: new Date().toISOString(),
+      updated: new Date().toISOString(),
+      cards: [],
+    };
+  }
+}
+
+export function writeFlashcards(
+  wikiDir: string,
+  deck: FlashcardDeck
+): void {
+  deck.updated = new Date().toISOString();
+  fs.writeFileSync(
+    flashcardsPath(wikiDir),
+    JSON.stringify(deck, null, 2),
+    "utf-8"
+  );
+}
+
+export function appendFlashcards(
+  wikiDir: string,
+  newCards: Flashcard[]
+): void {
+  const deck = readFlashcards(wikiDir);
+  deck.cards.push(...newCards);
+  writeFlashcards(wikiDir, deck);
+}
+
+export function updateFlashcardReview(
+  wikiDir: string,
+  cardId: string,
+  confidence: number
+): void {
+  const deck = readFlashcards(wikiDir);
+  const card = deck.cards.find((c) => c.id === cardId);
+  if (!card) return;
+  card.lastReviewed = new Date().toISOString();
+  card.confidence = confidence;
+  card.reviewCount += 1;
+  card.streak = confidence >= 2 ? card.streak + 1 : 0;
+  writeFlashcards(wikiDir, deck);
+}
+
+export function exportFlashcardsToAnkiCSV(wikiDir: string): string {
+  const deck = readFlashcards(wikiDir);
+  const escape = (s: string) =>
+    s.replace(/\t/g, " ").replace(/\n/g, "<br>");
+  const lines = deck.cards.map(
+    (c) =>
+      `${escape(c.question)}\t${escape(c.answer)}\t${escape(c.pageSource)}`
+  );
+  return lines.join("\n");
+}
+
+// ─── Exam prep types and persistence ──────────────────────────────────
+
+export interface ConceptChecklistItem {
+  concept: string;
+  pageId: string | null;
+  mastery: "not-started" | "weak" | "developing" | "strong";
+  notes: string;
+}
+
+export interface StudyPlanDay {
+  date: string;
+  topics: string[];
+  flashcardTarget: number;
+  completed: boolean;
+}
+
+export interface PracticeQuestion {
+  id: string;
+  question: string;
+  expectedAnswer: string;
+  difficulty: "easy" | "medium" | "hard";
+  relatedConcepts: string[];
+  attempted: boolean;
+  userAnswer: string | null;
+}
+
+export interface ExamPrepSession {
+  id: string;
+  title: string;
+  examDate: string;
+  created: string;
+  updated: string;
+  scope: string[];
+  conceptChecklist: ConceptChecklistItem[];
+  studyPlan: StudyPlanDay[];
+  practiceQuestions: PracticeQuestion[];
+  status: "active" | "completed" | "archived";
+}
+
+function examsPath(wikiDir: string): string {
+  return path.join(wikiDir, "exams.json");
+}
+
+export function readExamSessions(wikiDir: string): ExamPrepSession[] {
+  const fp = examsPath(wikiDir);
+  if (!fs.existsSync(fp)) return [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(fp, "utf-8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeExamSessions(
+  wikiDir: string,
+  sessions: ExamPrepSession[]
+): void {
+  fs.writeFileSync(
+    examsPath(wikiDir),
+    JSON.stringify(sessions, null, 2),
+    "utf-8"
+  );
+}
+
+export function upsertExamSession(
+  wikiDir: string,
+  session: ExamPrepSession
+): void {
+  const sessions = readExamSessions(wikiDir);
+  const idx = sessions.findIndex((s) => s.id === session.id);
+  session.updated = new Date().toISOString();
+  if (idx >= 0) sessions[idx] = session;
+  else sessions.push(session);
+  writeExamSessions(wikiDir, sessions);
 }
