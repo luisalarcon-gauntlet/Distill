@@ -3288,7 +3288,7 @@ export default function WikiApp() {
                 cursor: "pointer",
               }}
             >
-              Anki
+              Export
             </button>
           )}
           <button
