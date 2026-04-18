@@ -3,18 +3,286 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =============================================================
+   Distill Design System — Tokens (v2, undergrad-oriented)
+   Base values lifted from quandole-oss/Distill source.
+   v2 adds: light "library" mode + per-course accents + warmer lavender.
+   ============================================================= */
+
 :root {
-  --bg: #0a0a0f;
-  --surface: #12121a;
-  --border: #1e1e2e;
-  --text: #e0dfe6;
-  --text-muted: #7a7a8c;
-  --accent: #c4a1ff;
-  --link: #90c4ff;
+  /* ---------- Color: base surface ramp ---------- */
+  --bg:            #0a0a0f;   /* canvas */
+  --surface:       #12121a;   /* card / raised */
+  --surface-2:     #1a1a26;   /* input fill */
+  --chip:          #2a2a3e;   /* pill background */
+  --border:        #1e1e2e;   /* hairline divider */
+
+  /* ---------- Color: text ramp ---------- */
+  --fg-strong:     #e0dfe6;
+  --fg:            #b0afba;
+  --fg-muted:      #7a7a8c;
+  --fg-faint:      #4a4a5c;
+
+  /* ---------- Color: accent ---------- */
+  --accent:        #c4a1ff;   /* Distill Lavender */
+  --accent-quiet:  #8b6fc0;   /* label accent */
+  --accent-10:     rgba(196,161,255,0.10);
+  --accent-08:     rgba(196,161,255,0.08);
+  --accent-05:     rgba(196,161,255,0.05);
+  --accent-25:     #c4a1ff40; /* hover border */
+
+  /* ---------- Color: page-type palette ---------- */
+  --type-overview: #c4a1ff;
+  --type-concept:  #90c4ff;   /* also: link blue */
+  --type-entity:   #7ec99a;
+  --type-source:   #d4a855;
+  --type-analysis: #d46a6a;
+
+  /* ---------- Color: semantic aliases ---------- */
+  --link:          #90c4ff;
+  --success:       #7ec99a;
+  --warn:          #d4a855;
+  --danger:        #d46a6a;
+
+  /* ---------- Typography: families ---------- */
+  --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+
+  /* ---------- Typography: base scale ---------- */
+  --text-9:  9px;    /* node label (graph) */
+  --text-10: 10px;   /* uppercase label chips */
+  --text-11: 11px;   /* button text, filepath */
+  --text-12: 12px;   /* secondary */
+  --text-13: 13px;   /* default body mono / sidebar row */
+  --text-14: 14px;   /* form input, body prose */
+  --text-15: 15px;   /* sidebar header */
+  --text-22: 22px;   /* page title */
+  --text-24: 24px;   /* create heading */
+  --text-32: 32px;   /* screen hero */
+
+  /* ---------- Typography: tracking ---------- */
+  --track-label:   0.15em;   /* the signature uppercase tracking */
+
+  /* ---------- Spacing (4px base) ---------- */
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  16px;
+  --s-5:  20px;
+  --s-6:  24px;
+  --s-8:  32px;
+  --s-10: 40px;
+
+  /* ---------- Radii ---------- */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-xl: 12px;
+
+  /* ---------- Borders / dividers ---------- */
+  --hairline: 1px solid var(--border);
+  --hairline-accent: 1px solid var(--accent-25);
+
+  /* ---------- Motion ---------- */
+  --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --dur-fast: 0.15s;
+
+  /* ---------- Layout ---------- */
+  --sidebar-w: 280px;
+  --content-max: 780px;
+
+  /* ---------- v2: per-course accents (assignable per notebook) ---------- */
+  --course-violet: #c4a1ff;   /* default Distill Lavender */
+  --course-amber:  #ffb86b;
+  --course-sage:   #7ec99a;
+  --course-rose:   #f4a3b8;
+  --course-sky:    #8ecae6;
+  --course-citrus: #d4d45a;
 }
+
+/* ---------- v2: light "library" mode ----------
+   Cream paper, deep plum ink. Toggle by adding data-theme="light"
+   to <html> or <body>. All component styles pull from these vars. */
+[data-theme="light"] {
+  --bg:            #fbf7ef;   /* warm cream */
+  --surface:       #ffffff;
+  --surface-2:     #f1ead9;
+  --chip:          #e8dfcb;
+  --border:        #e3d8be;
+
+  --fg-strong:     #2a2238;
+  --fg:            #4e4560;
+  --fg-muted:      #7a7187;
+  --fg-faint:      #a89f8f;
+
+  --accent:        #3b2f5a;   /* deep plum ink */
+  --accent-quiet:  #6b5a8c;
+  --accent-10:     rgba(59,47,90,0.08);
+  --accent-08:     rgba(59,47,90,0.06);
+  --accent-05:     rgba(59,47,90,0.04);
+  --accent-25:     rgba(59,47,90,0.25);
+
+  --type-overview: #3b2f5a;
+  --type-concept:  #2e6fa6;
+  --type-entity:   #2f7a4c;
+  --type-source:   #a0691f;
+  --type-analysis: #a84040;
+
+  --link:          #2e6fa6;
+  --success:       #2f7a4c;
+  --warn:          #a0691f;
+  --danger:        #a84040;
+}
+
+/* =============================================================
+   Semantic element styles
+   ============================================================= */
 
 body {
   background: var(--bg);
-  color: var(--text);
-  font-family: 'IBM Plex Sans', sans-serif;
+  color: var(--fg-strong);
+  font-family: var(--font-sans);
+  font-size: var(--text-14);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1 {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-32);
+  line-height: 1.15;
+  color: var(--fg-strong);
+  letter-spacing: -0.005em;
+}
+
+h2 {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-24);
+  line-height: 1.25;
+  color: var(--fg-strong);
+}
+
+h3 {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-22);
+  line-height: 1.3;
+  color: var(--fg-strong);
+}
+
+h4 {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-15);
+  color: var(--fg-strong);
+}
+
+p {
+  font-family: var(--font-sans);
+  font-size: var(--text-14);
+  line-height: 1.7;
+  color: var(--fg);
+}
+
+small, .small {
+  font-size: var(--text-12);
+  color: var(--fg-muted);
+}
+
+code, kbd, pre, .mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-13);
+}
+
+code {
+  color: var(--accent);
+  background: var(--accent-05);
+  border: var(--hairline);
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+}
+
+a, .link {
+  color: var(--link);
+  border-bottom: 1px solid rgba(144,196,255,0.2);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+hr {
+  border: 0;
+  border-top: var(--hairline);
+  margin: var(--s-6) 0;
+}
+
+/* The signature tracked-out uppercase mono label */
+.label {
+  font-family: var(--font-mono);
+  font-size: var(--text-10);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--track-label);
+  color: var(--fg-muted);
+}
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border: var(--hairline);
+  border-radius: var(--r-lg);
+  padding: var(--s-4);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.card:hover {
+  border-color: var(--accent-25);
+}
+
+/* Inputs */
+.input {
+  width: 100%;
+  padding: 10px 14px;
+  font-family: var(--font-sans);
+  font-size: var(--text-14);
+  color: var(--fg-strong);
+  background: var(--surface);
+  border: var(--hairline);
+  border-radius: var(--r-lg);
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.input:focus {
+  border-color: var(--accent);
+}
+
+/* Primary button */
+.btn-primary {
+  font-family: var(--font-mono);
+  font-size: var(--text-14);
+  font-weight: 500;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--r-lg);
+  padding: 12px 20px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.btn-primary:disabled {
+  color: var(--fg-faint);
+  background: var(--border);
+  cursor: not-allowed;
+}
+
+/* Ghost button */
+.btn-ghost {
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
+  color: var(--accent);
+  background: var(--accent-10);
+  border: none;
+  border-radius: var(--r-md);
+  padding: 6px 10px;
+  cursor: pointer;
 }
