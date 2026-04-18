@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useRef } from "react";
+import { useReducer, useRef, useEffect } from "react";
 import type { Screen } from "@/components/shared/types";
 
 // ---------------------------------------------------------------------------
@@ -31,6 +31,8 @@ type ImportPhase =
   | { step: "uploading"; file: File }
   | { step: "extracting"; file: File }
   | { step: "reviewing"; file: File; curriculum: CurriculumStructure; edited: EditableFields }
+  | { step: "creating"; file: File; edited: EditableFields }
+  | { step: "done" }
   | { step: "error"; message: string };
 
 // ---------------------------------------------------------------------------
@@ -43,6 +45,8 @@ type Action =
   | { type: "EXTRACT_SUCCESS"; curriculum: CurriculumStructure }
   | { type: "EDIT_FIELD"; field: keyof EditableFields; value: string }
   | { type: "EXTRACT_ERROR"; message: string }
+  | { type: "START_CREATE" }
+  | { type: "CREATE_ERROR"; message: string }
   | { type: "RESET" };
 
 function editableFromCurriculum(c: CurriculumStructure): EditableFields {
@@ -82,6 +86,14 @@ function reducer(state: ImportPhase, action: Action): ImportPhase {
     case "EXTRACT_ERROR":
       return { step: "error", message: action.message };
 
+    case "START_CREATE":
+      if (state.step !== "reviewing") return state;
+      return { step: "creating", file: state.file, edited: state.edited };
+
+    case "CREATE_ERROR":
+      if (state.step !== "creating") return state;
+      return { step: "error", message: action.message };
+
     case "RESET":
       return { step: "idle" };
 
@@ -91,22 +103,66 @@ function reducer(state: ImportPhase, action: Action): ImportPhase {
 }
 
 // ---------------------------------------------------------------------------
+// Creating-phase progress messages
+// ---------------------------------------------------------------------------
+
+const CREATING_MESSAGES = [
+  "Saving your PDF...",
+  "Skimming syllabus...",
+  "Compiling your notebook...",
+];
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 interface SyllabusImportProps {
   onNavigate: (screen: Screen, brainId?: string) => void;
-  onConfirm?: () => void;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function SyllabusImport({ onNavigate, onConfirm }: SyllabusImportProps) {
+export function SyllabusImport({ onNavigate }: SyllabusImportProps) {
   const [phase, dispatch] = useReducer(reducer, { step: "idle" });
   const [isDragging, setIsDragging] = useReducerBool(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const defaultDirectoryRef = useRef<string>("/tmp/distill");
+  const [creatingMsgIdx, setCreatingMsgIdx] = useReducerNumber(0);
+
+  // ---------------------------------------------------------------------------
+  // Fetch default directory on mount via /api/browse
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    async function fetchDefaultDir() {
+      try {
+        const res = await fetch("/api/browse");
+        if (res.ok) {
+          const data = await res.json();
+          // /api/browse GET returns { current, parent, dirs }
+          if (typeof data.current === "string" && data.current) {
+            defaultDirectoryRef.current = data.current;
+          }
+        }
+      } catch {
+        // Fall back to /tmp/distill — safe for local-first app
+      }
+    }
+    fetchDefaultDir();
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Cycle progress messages during creating phase
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (phase.step !== "creating") return;
+    setCreatingMsgIdx(0);
+    const intervalId = setInterval(() => {
+      setCreatingMsgIdx((prev) => (prev + 1) % CREATING_MESSAGES.length);
+    }, 4000);
+    return () => clearInterval(intervalId);
+  }, [phase.step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------------------------------------------------------------------------
   // Parse trigger — called immediately after DROP_FILE
@@ -137,6 +193,49 @@ export function SyllabusImport({ onNavigate, onConfirm }: SyllabusImportProps) {
     } catch (err: any) {
       dispatch({
         type: "EXTRACT_ERROR",
+        message: err?.message ?? "Network error — please try again.",
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Create notebook — posts to /api/brains/upload
+  // ---------------------------------------------------------------------------
+  async function handleConfirm() {
+    if (phase.step !== "reviewing") return;
+
+    const { file, edited } = phase;
+    dispatch({ type: "START_CREATE" });
+
+    const formData = new FormData();
+    formData.append("name", edited.courseName.trim() || "Untitled Course");
+    formData.append("topic", edited.instructor.trim() || edited.courseName.trim());
+    formData.append("directory", defaultDirectoryRef.current);
+    formData.append("files", file);
+    formData.append("courseCode", edited.courseCode.trim());
+    formData.append("semester", edited.semester.trim());
+
+    try {
+      const res = await fetch("/api/brains/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        dispatch({
+          type: "CREATE_ERROR",
+          message: data?.error ?? `Server error (${res.status})`,
+        });
+        return;
+      }
+
+      // Success — navigate back to dashboard; the brains list will reload
+      onNavigate("dashboard");
+    } catch (err: any) {
+      dispatch({
+        type: "CREATE_ERROR",
         message: err?.message ?? "Network error — please try again.",
       });
     }
@@ -186,7 +285,82 @@ export function SyllabusImport({ onNavigate, onConfirm }: SyllabusImportProps) {
       : 0;
 
   // ---------------------------------------------------------------------------
-  // Render
+  // Creating phase UI
+  // ---------------------------------------------------------------------------
+  if (phase.step === "creating") {
+    return (
+      <>
+        <style>{`
+          @keyframes progress-indeterminate {
+            0%   { transform: translateX(-100%); width: 50%; }
+            100% { transform: translateX(300%); width: 50%; }
+          }
+        `}</style>
+        <div
+          style={{
+            maxWidth: "560px",
+            margin: "0 auto",
+            padding: "24px",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          <div
+            style={{
+              marginTop: "80px",
+              textAlign: "center",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "var(--text-13)",
+                color: "var(--fg-muted)",
+                fontFamily: "var(--font-mono)",
+                marginBottom: "16px",
+              }}
+            >
+              {CREATING_MESSAGES[creatingMsgIdx]}
+            </div>
+
+            {/* Indeterminate progress bar */}
+            <div
+              style={{
+                background: "var(--border)",
+                height: "2px",
+                borderRadius: "1px",
+                overflow: "hidden",
+                position: "relative",
+                maxWidth: "320px",
+                margin: "0 auto",
+              }}
+            >
+              <div
+                style={{
+                  background: "var(--accent)",
+                  height: "100%",
+                  position: "absolute",
+                  animation: "progress-indeterminate 2s linear infinite",
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                marginTop: "12px",
+                fontSize: "var(--text-11)",
+                color: "var(--fg-faint)",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              This takes 30–90 seconds
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Render (idle / uploading / extracting / reviewing / error)
   // ---------------------------------------------------------------------------
   return (
     <>
@@ -553,7 +727,7 @@ export function SyllabusImport({ onNavigate, onConfirm }: SyllabusImportProps) {
             <div style={{ marginTop: "16px", textAlign: "right" }}>
               <button
                 disabled={phase.edited.courseName.trim() === ""}
-                onClick={onConfirm}
+                onClick={handleConfirm}
                 style={{
                   background:
                     phase.edited.courseName.trim() === ""
@@ -574,7 +748,6 @@ export function SyllabusImport({ onNavigate, onConfirm }: SyllabusImportProps) {
                 }}
               >
                 Create notebook &rarr;
-                {/* TODO: Plan 02 wires onConfirm to /api/brains/upload submission */}
               </button>
             </div>
           </div>
@@ -639,5 +812,19 @@ function useReducerBool(
   initial: boolean
 ): [boolean, (next: boolean) => void] {
   const [val, dispatch] = useReducer((_: boolean, next: boolean) => next, initial);
+  return [val, dispatch];
+}
+
+// ---------------------------------------------------------------------------
+// Tiny useState-compatible number state using useReducer
+// ---------------------------------------------------------------------------
+function useReducerNumber(
+  initial: number
+): [number, (next: number | ((prev: number) => number)) => void] {
+  const [val, dispatch] = useReducer(
+    (prev: number, next: number | ((prev: number) => number)) =>
+      typeof next === "function" ? next(prev) : next,
+    initial
+  );
   return [val, dispatch];
 }
