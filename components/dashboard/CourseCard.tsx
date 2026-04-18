@@ -14,20 +14,22 @@ function resolveSafeAccentColor(courseColor?: string): string | undefined {
   return undefined;
 }
 
+const COLOR_VALUES = Object.values(COURSE_COLORS);
+
 interface CourseCardProps {
   brain: BrainConfig;
   pageCount: number;
+  index: number;
   onClick: () => void;
 }
 
-export function CourseCard({ brain, pageCount, onClick }: CourseCardProps) {
+export function CourseCard({ brain, pageCount, index, onClick }: CourseCardProps) {
   const [hovered, setHovered] = useState(false);
 
   const safeAccentColor = resolveSafeAccentColor(brain.courseColor);
-  // Fallback to var(--border) when no valid courseColor
-  const accentBorder = safeAccentColor
-    ? `3px solid ${safeAccentColor}`
-    : "3px solid var(--border)";
+  // Auto-assign color based on index if brain has no courseColor
+  const accentColor = safeAccentColor || COLOR_VALUES[index % COLOR_VALUES.length];
+  const accentBorder = `3px solid ${accentColor}`;
 
   // Derive short path without importing path (client-side safe)
   const shortPath = brain.path.split("/").slice(-2).join("/");
@@ -54,7 +56,7 @@ export function CourseCard({ brain, pageCount, onClick }: CourseCardProps) {
           style={{
             fontFamily: "var(--font-mono)",
             fontSize: "var(--text-10)",
-            color: "var(--fg-muted)",
+            color: accentColor,
             letterSpacing: "0.15em",
             textTransform: "uppercase",
           }}

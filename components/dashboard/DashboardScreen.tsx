@@ -176,11 +176,12 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
                 gap: "10px",
               }}
             >
-              {brains.map((brain) => (
+              {brains.map((brain, i) => (
                 <CourseCard
                   key={brain.id}
                   brain={brain}
                   pageCount={pageCounts[brain.id] ?? 0}
+                  index={i}
                   onClick={() => onNavigate("course", brain.id)}
                 />
               ))}
