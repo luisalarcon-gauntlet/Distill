@@ -286,3 +286,60 @@ hr {
   padding: 6px 10px;
   cursor: pointer;
 }
+
+/* ── Flashcard 3D flip ── */
+.card-flip {
+  perspective: 1000px;
+  cursor: pointer;
+  min-height: 160px;
+}
+.card-inner {
+  position: relative;
+  width: 100%;
+  min-height: 160px;
+  transition: transform 0.45s cubic-bezier(0.25, 0.1, 0.25, 1);
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+}
+.card-inner.is-flipped {
+  transform: rotateY(180deg);
+  -webkit-transform: rotateY(180deg);
+}
+.card-front,
+.card-back {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  background: var(--surface);
+  border: var(--hairline);
+  border-radius: 10px;
+  padding: 28px 22px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.card-back {
+  transform: rotateY(180deg);
+  -webkit-transform: rotateY(180deg);
+}
+.card-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-10);
+  color: var(--fg-muted);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.card-body {
+  font-size: 17px;
+  color: var(--fg-strong);
+  line-height: 1.5;
+  font-family: var(--font-sans);
+}
+.card-source {
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
+  color: var(--fg-faint);
+  margin-top: 14px;
+}
