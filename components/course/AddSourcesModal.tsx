@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useReducer, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import type { Paper } from "@/components/shared/types";
+import type { Paper, WikiPage } from "@/components/shared/types";
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
 interface AddSourcesModalProps {
   open: boolean;
   brainId: string;
+  pages: WikiPage[];
   onClose: () => void;
   onIngestComplete: () => void;
 }
@@ -29,6 +30,27 @@ const TABS: { id: ModalTab; label: string }[] = [
   { id: "upload-pdf", label: "Upload PDF" },
   { id: "sources", label: "Sources" },
 ];
+
+// ─── Source badge constants ───────────────────────────────────────────────────
+
+const SOURCE_LABELS: Record<Paper["source_api"], string> = {
+  semantic_scholar: "S2",
+  arxiv: "arXiv",
+  openalex: "OpenAlex",
+};
+
+// CSS variable names for source fg/bg — no hardcoded hex
+const SOURCE_FG: Record<Paper["source_api"], string> = {
+  semantic_scholar: "var(--link)",        // #90c4ff
+  arxiv:            "var(--warn)",         // #d4a855
+  openalex:         "var(--success)",      // #7ec99a
+};
+
+const SOURCE_BG: Record<Paper["source_api"], string> = {
+  semantic_scholar: "var(--accent-08)",    // rgba(144,196,255,0.12) ≈ accent-08 for token purity
+  arxiv:            "rgba(212,168,85,0.12)",   // no direct var — using rgba of warn
+  openalex:         "rgba(126,201,154,0.12)",  // no direct var — using rgba of success
+};
 
 // ─── Auto-research state machine ──────────────────────────────────────────────
 
@@ -130,11 +152,19 @@ function autoReducer(state: AutoState, action: AutoAction): AutoState {
   }
 }
 
+// ─── File size helper ─────────────────────────────────────────────────────────
+
+const formatFileSize = (bytes: number) =>
+  bytes < 1048576
+    ? (bytes / 1024).toFixed(1) + " KB"
+    : (bytes / 1048576).toFixed(1) + " MB";
+
 // ─── AddSourcesModal ──────────────────────────────────────────────────────────
 
 export function AddSourcesModal({
   open,
   brainId,
+  pages,
   onClose,
   onIngestComplete,
 }: AddSourcesModalProps) {
@@ -148,29 +178,39 @@ export function AddSourcesModal({
     selected: new Set<string>(),
   });
 
-  // ── Search papers tab state (Plan 03) ───────────────────────────────────────
+  // ── Search papers tab state ─────────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Paper[]>([]);
+  const [searchSearching, setSearchSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchAdded, setSearchAdded] = useState<Set<string>>(new Set());
 
-  // ── Paste DOI tab state (Plan 03) ───────────────────────────────────────────
+  // ── Paste DOI tab state ─────────────────────────────────────────────────────
   const [doiInput, setDoiInput] = useState("");
   const [doiResolved, setDoiResolved] = useState<Paper | null>(null);
+  const [doiResolving, setDoiResolving] = useState(false);
+  const [doiError, setDoiError] = useState<string | null>(null);
 
-  // ── Upload PDF tab state (Plan 03) ──────────────────────────────────────────
+  // ── Upload PDF tab state ────────────────────────────────────────────────────
   const [uploadQueue, setUploadQueue] = useState<File[]>([]);
+  const [uploadDragOver, setUploadDragOver] = useState(false);
 
-  // ── Shared queued papers for footer CTA (Plan 03 adds to this) ─────────────
+  // ── Shared queued papers for footer CTA ────────────────────────────────────
   const [queuedPapers, setQueuedPapers] = useState<Paper[]>([]);
+
+  // ── Footer compile state ────────────────────────────────────────────────────
+  const [compiling, setCompiling] = useState(false);
+  const [compileError, setCompileError] = useState<string | null>(null);
 
   // ── Refs ────────────────────────────────────────────────────────────────────
   const modalRef = useRef<HTMLDivElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
 
   // ── Focus trap + Escape ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!open) return;
 
-    // Focus first focusable element
     const focusableSelectors =
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -180,7 +220,6 @@ export function AddSourcesModal({
       if (focusable.length > 0) focusable[0].focus();
     };
 
-    // Small rAF to ensure portal has mounted
     const rafId = requestAnimationFrame(focusFirst);
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -276,12 +315,107 @@ export function AddSourcesModal({
     [onClose]
   );
 
+  // ── Search papers: handlers ─────────────────────────────────────────────────
+  const handleSearch = useCallback(async () => {
+    if (!searchQuery.trim()) return;
+    setSearchSearching(true);
+    setSearchError(null);
+    try {
+      const res = await fetch(`/api/brains/${brainId}/ingest/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: searchQuery }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setSearchResults(data.papers || []);
+    } catch (e: any) {
+      setSearchError(e.message);
+    } finally {
+      setSearchSearching(false);
+    }
+  }, [searchQuery, brainId]);
+
+  const handleAddPaper = useCallback((paper: Paper) => {
+    setQueuedPapers((prev) => {
+      if (prev.find((p) => p.id === paper.id)) return prev;
+      return [...prev, paper];
+    });
+    setSearchAdded((prev) => new Set([...prev, paper.id]));
+  }, []);
+
+  // ── Paste DOI: handler ──────────────────────────────────────────────────────
+  const handleResolve = useCallback(async () => {
+    if (!doiInput.trim()) return;
+    setDoiResolving(true);
+    setDoiError(null);
+    setDoiResolved(null);
+    try {
+      const res = await fetch(`/api/brains/${brainId}/ingest/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: doiInput.trim() }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const paper = data.papers?.[0] ?? null;
+      if (!paper) throw new Error("No paper found for this identifier");
+      setDoiResolved(paper);
+    } catch (e: any) {
+      setDoiError(e.message);
+    } finally {
+      setDoiResolving(false);
+    }
+  }, [doiInput, brainId]);
+
+  // ── Footer: compile handler ─────────────────────────────────────────────────
+  const handleCompileQueued = useCallback(async () => {
+    if (queuedPapers.length === 0) return;
+    setCompiling(true);
+    setCompileError(null);
+    try {
+      const res = await fetch(`/api/brains/${brainId}/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ papers: queuedPapers }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setQueuedPapers([]);
+      setSearchAdded(new Set());
+      onIngestComplete();
+      onClose();
+    } catch (e: any) {
+      setCompileError(e.message);
+    } finally {
+      setCompiling(false);
+    }
+  }, [queuedPapers, brainId, onIngestComplete, onClose]);
+
   // ── SSR guard ──────────────────────────────────────────────────────────────
   if (typeof document === "undefined" || !open) return null;
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Render helpers
   // ─────────────────────────────────────────────────────────────────────────────
+
+  const renderSourceBadge = (api: Paper["source_api"]) => (
+    <span
+      style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: "var(--text-10)",
+        color: SOURCE_FG[api],
+        background: SOURCE_BG[api],
+        border: `1px solid ${SOURCE_FG[api]}`,
+        borderRadius: "var(--r-sm)",
+        padding: "1px 5px",
+        whiteSpace: "nowrap",
+        opacity: 0.9,
+      }}
+    >
+      {SOURCE_LABELS[api]}
+    </span>
+  );
 
   const renderAutoResearchTab = () => {
     const { stage, log, candidates, selected } = autoState;
@@ -296,11 +430,7 @@ export function AddSourcesModal({
             value={autoTopic}
             onChange={(e) => setAutoTopic(e.target.value)}
             onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                autoTopic.trim() &&
-                stage === "idle"
-              ) {
+              if (e.key === "Enter" && autoTopic.trim() && stage === "idle") {
                 dispatch({ type: "START", topic: autoTopic.trim() });
               }
             }}
@@ -360,7 +490,7 @@ export function AddSourcesModal({
           )}
         </div>
 
-        {/* Terminal log — shown once we leave idle */}
+        {/* Terminal log */}
         {log.length > 0 && (
           <div
             ref={logRef}
@@ -462,7 +592,7 @@ export function AddSourcesModal({
           </div>
         )}
 
-        {/* Selecting stage — no candidates */}
+        {/* Selecting — no candidates */}
         {stage === "selecting" && candidates.length === 0 && (
           <div
             style={{
@@ -535,18 +665,616 @@ export function AddSourcesModal({
     );
   };
 
-  const renderPlaceholderTab = (label: string) => (
-    <div
-      style={{
-        padding: "var(--s-4)",
-        color: "var(--fg-faint)",
-        fontSize: "var(--text-13)",
-        fontFamily: "var(--font-mono)",
-      }}
-    >
-      {label} — coming in next plan
+  const renderSearchPapersTab = () => (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {/* Search bar row */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !searchSearching) handleSearch();
+          }}
+          disabled={searchSearching}
+          placeholder="Search Semantic Scholar, arXiv, OpenAlex..."
+          style={{
+            flex: 1,
+            background: "var(--surface)",
+            border: "var(--hairline)",
+            borderRadius: "var(--r-md)",
+            padding: "8px 12px",
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-13)",
+            color: "var(--fg-strong)",
+            outline: "none",
+            opacity: searchSearching ? 0.6 : 1,
+          }}
+        />
+        <button
+          onClick={handleSearch}
+          disabled={searchSearching || !searchQuery.trim()}
+          style={{
+            background: "var(--accent)",
+            color: "var(--bg)",
+            border: "none",
+            borderRadius: "var(--r-md)",
+            padding: "8px 14px",
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-12)",
+            fontWeight: 600,
+            cursor: searchSearching || !searchQuery.trim() ? "not-allowed" : "pointer",
+            opacity: searchSearching || !searchQuery.trim() ? 0.5 : 1,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {searchSearching ? "Searching..." : "Search"}
+        </button>
+      </div>
+
+      {/* Inline error */}
+      {searchError && (
+        <div
+          style={{
+            marginTop: 8,
+            fontSize: "var(--text-12)",
+            color: "var(--danger)",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          {searchError}
+        </div>
+      )}
+
+      {/* Results list */}
+      {searchResults.length > 0 && (
+        <div
+          style={{
+            marginTop: 12,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          {searchResults.map((paper) => {
+            const added = searchAdded.has(paper.id);
+            const truncatedTitle =
+              paper.title.length > 80
+                ? paper.title.slice(0, 80) + "…"
+                : paper.title;
+            const truncatedAbstract =
+              paper.abstract.length > 120
+                ? paper.abstract.slice(0, 120) + "…"
+                : paper.abstract;
+            const authorsDisplay =
+              paper.authors.length > 0
+                ? paper.authors.slice(0, 2).join(", ") +
+                  (paper.authors.length > 2 ? " et al." : "")
+                : "";
+
+            return (
+              <div
+                key={paper.id}
+                style={{
+                  background: "var(--surface)",
+                  border: "var(--hairline)",
+                  borderRadius: "var(--r-md)",
+                  padding: 12,
+                }}
+              >
+                {/* Header row: title + Add/Added button */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 8,
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "var(--text-13)",
+                      color: "var(--fg-strong)",
+                      lineHeight: 1.4,
+                      flex: 1,
+                    }}
+                  >
+                    {truncatedTitle}
+                  </span>
+                  <button
+                    onClick={() => !added && handleAddPaper(paper)}
+                    disabled={added}
+                    style={{
+                      flexShrink: 0,
+                      background: added
+                        ? "var(--accent-08)"
+                        : "var(--accent-10)",
+                      color: added ? "var(--success)" : "var(--accent)",
+                      border: added
+                        ? "1px solid var(--success)"
+                        : "1px solid var(--accent-25)",
+                      borderRadius: "var(--r-sm)",
+                      padding: "2px 8px",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "var(--text-10)",
+                      cursor: added ? "default" : "pointer",
+                    }}
+                  >
+                    {added ? "Added" : "Add"}
+                  </button>
+                </div>
+
+                {/* Meta row: badge + year + citations */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginTop: 6,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {renderSourceBadge(paper.source_api)}
+                  {authorsDisplay && (
+                    <span
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: "var(--text-10)",
+                        color: "var(--fg-faint)",
+                      }}
+                    >
+                      {authorsDisplay}
+                    </span>
+                  )}
+                  {paper.year && (
+                    <span
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: "var(--text-10)",
+                        color: "var(--fg-faint)",
+                      }}
+                    >
+                      {paper.year}
+                    </span>
+                  )}
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "var(--text-10)",
+                      color: "var(--fg-faint)",
+                    }}
+                  >
+                    {paper.citationCount} citations
+                  </span>
+                </div>
+
+                {/* TL;DR */}
+                {truncatedAbstract && (
+                  <div
+                    style={{
+                      marginTop: 4,
+                      fontSize: "var(--text-12)",
+                      color: "var(--fg-muted)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {truncatedAbstract}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Empty state after search */}
+      {!searchSearching && searchResults.length === 0 && searchQuery && !searchError && (
+        <div
+          style={{
+            marginTop: 12,
+            fontSize: "var(--text-13)",
+            color: "var(--fg-muted)",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          No results. Try a different query.
+        </div>
+      )}
     </div>
   );
+
+  const renderPasteDoiTab = () => (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {/* Label */}
+      <div
+        style={{
+          fontSize: "var(--text-12)",
+          color: "var(--fg-muted)",
+          fontFamily: "var(--font-mono)",
+        }}
+      >
+        Paste a DOI, arXiv ID, or paper URL
+      </div>
+
+      {/* Input + Resolve row */}
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <input
+          type="text"
+          value={doiInput}
+          onChange={(e) => setDoiInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !doiResolving) handleResolve();
+          }}
+          disabled={doiResolving}
+          placeholder="10.1145/3290605.3300469 or arxiv:1706.03762"
+          style={{
+            flex: 1,
+            background: "var(--surface)",
+            border: "var(--hairline)",
+            borderRadius: "var(--r-md)",
+            padding: "8px 12px",
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-13)",
+            color: "var(--fg-strong)",
+            outline: "none",
+            opacity: doiResolving ? 0.6 : 1,
+          }}
+        />
+        <button
+          onClick={handleResolve}
+          disabled={doiResolving || !doiInput.trim()}
+          style={{
+            background: "var(--accent)",
+            color: "var(--bg)",
+            border: "none",
+            borderRadius: "var(--r-md)",
+            padding: "8px 14px",
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-12)",
+            fontWeight: 600,
+            cursor: doiResolving || !doiInput.trim() ? "not-allowed" : "pointer",
+            opacity: doiResolving || !doiInput.trim() ? 0.5 : 1,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {doiResolving ? "Resolving..." : "Resolve"}
+        </button>
+      </div>
+
+      {/* Error */}
+      {doiError && (
+        <div
+          style={{
+            marginTop: 8,
+            fontSize: "var(--text-12)",
+            color: "var(--danger)",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          {doiError}
+        </div>
+      )}
+
+      {/* Preview card */}
+      {doiResolved && (
+        <div
+          style={{
+            marginTop: 12,
+            background: "var(--surface)",
+            border: "var(--hairline)",
+            borderRadius: "var(--r-md)",
+            padding: 12,
+          }}
+        >
+          <div
+            style={{
+              fontSize: "var(--text-14)",
+              color: "var(--fg-strong)",
+              lineHeight: 1.4,
+            }}
+          >
+            {doiResolved.title}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginTop: 6,
+              flexWrap: "wrap",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "var(--text-11)",
+                color: "var(--fg-faint)",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {doiResolved.authors.slice(0, 2).join(", ")}
+              {doiResolved.authors.length > 2 ? " et al." : ""}
+              {doiResolved.year ? ` · ${doiResolved.year}` : ""}
+            </span>
+            {renderSourceBadge(doiResolved.source_api)}
+          </div>
+          {doiResolved.abstract && (
+            <div
+              style={{
+                marginTop: 6,
+                fontSize: "var(--text-12)",
+                color: "var(--fg-muted)",
+                lineHeight: 1.5,
+              }}
+            >
+              {doiResolved.abstract.length > 150
+                ? doiResolved.abstract.slice(0, 150) + "…"
+                : doiResolved.abstract}
+            </div>
+          )}
+          <button
+            onClick={() => {
+              handleAddPaper(doiResolved);
+              setDoiResolved(null);
+              setDoiInput("");
+            }}
+            style={{
+              marginTop: 10,
+              background: "var(--accent-10)",
+              color: "var(--accent)",
+              border: "1px solid var(--accent-25)",
+              borderRadius: "var(--r-sm)",
+              padding: "4px 12px",
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--text-11)",
+              cursor: "pointer",
+            }}
+          >
+            Add to queue
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderUploadPdfTab = () => (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {/* Drop zone */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setUploadDragOver(true);
+        }}
+        onDragLeave={() => setUploadDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setUploadDragOver(false);
+          const pdfs = Array.from(e.dataTransfer.files).filter(
+            (f) =>
+              f.name.toLowerCase().endsWith(".pdf") ||
+              f.type === "application/pdf"
+          );
+          if (pdfs.length) setUploadQueue((prev) => [...prev, ...pdfs]);
+        }}
+        onClick={() => pdfInputRef.current?.click()}
+        style={{
+          border: uploadDragOver
+            ? "1.5px solid var(--success)"
+            : "1.5px dashed var(--type-entity)",
+          borderRadius: "var(--r-lg)",
+          padding: 24,
+          textAlign: "center",
+          cursor: "pointer",
+          background: uploadDragOver ? "var(--accent-05)" : "transparent",
+          transition: "all 0.2s ease",
+        }}
+      >
+        <input
+          ref={pdfInputRef}
+          type="file"
+          multiple
+          accept=".pdf"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            const pdfs = files.filter((f) =>
+              f.name.toLowerCase().endsWith(".pdf")
+            );
+            if (pdfs.length) setUploadQueue((prev) => [...prev, ...pdfs]);
+            e.target.value = "";
+          }}
+        />
+        <div
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-13)",
+            color: "var(--fg-strong)",
+          }}
+        >
+          Drop PDFs here
+        </div>
+        <div
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-11)",
+            color: "var(--fg-faint)",
+            marginTop: 4,
+          }}
+        >
+          or click to browse
+        </div>
+      </div>
+
+      {/* Queued files list */}
+      {uploadQueue.length > 0 && (
+        <div
+          style={{
+            marginTop: 12,
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          {uploadQueue.map((file, i) => {
+            const name =
+              file.name.length > 50
+                ? file.name.slice(0, 50) + "…"
+                : file.name;
+            return (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "6px 8px",
+                  background: "var(--surface)",
+                  border: "var(--hairline)",
+                  borderRadius: "var(--r-sm)",
+                  gap: 8,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: "var(--text-12)",
+                    color: "var(--fg-strong)",
+                    fontFamily: "var(--font-mono)",
+                    flex: 1,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {name}
+                </span>
+                <span
+                  style={{
+                    fontSize: "var(--text-11)",
+                    color: "var(--fg-faint)",
+                    fontFamily: "var(--font-mono)",
+                    flexShrink: 0,
+                  }}
+                >
+                  {formatFileSize(file.size)}
+                </span>
+                <button
+                  onClick={() =>
+                    setUploadQueue((prev) => prev.filter((_, j) => j !== i))
+                  }
+                  aria-label={`Remove ${file.name}`}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--fg-faint)",
+                    cursor: "pointer",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "var(--text-13)",
+                    lineHeight: 1,
+                    padding: "0 2px",
+                    flexShrink: 0,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderSourcesTab = () => {
+    const sourcedPages = pages.filter((p) => p.type === "source");
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {/* Header */}
+        <div
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-12)",
+            color: "var(--fg-muted)",
+            marginBottom: 12,
+          }}
+        >
+          Already ingested
+        </div>
+
+        {sourcedPages.length === 0 ? (
+          <div
+            style={{
+              fontSize: "var(--text-13)",
+              color: "var(--fg-faint)",
+            }}
+          >
+            No sources ingested yet. Use Auto-research or Search papers to get
+            started.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {sourcedPages.map((page) => {
+              const sourceId =
+                page.sources[0] && page.sources[0].length > 60
+                  ? page.sources[0].slice(0, 60) + "…"
+                  : page.sources[0] ?? "";
+              return (
+                <div
+                  key={page.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    paddingTop: 8,
+                    paddingBottom: 8,
+                    borderBottom: "var(--hairline)",
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: "var(--text-13)",
+                        color: "var(--fg-strong)",
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {page.title}
+                    </div>
+                    {sourceId && (
+                      <div
+                        style={{
+                          fontSize: "var(--text-11)",
+                          color: "var(--fg-faint)",
+                          fontFamily: "var(--font-mono)",
+                          marginTop: 2,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {sourceId}
+                      </div>
+                    )}
+                  </div>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "var(--text-10)",
+                      color: "var(--fg-faint)",
+                      flexShrink: 0,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {page.links.length} links
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Portal render
@@ -679,13 +1407,10 @@ export function AddSourcesModal({
             }}
           >
             {activeTab === "auto-research" && renderAutoResearchTab()}
-            {activeTab === "search-papers" &&
-              renderPlaceholderTab("Search papers")}
-            {activeTab === "paste-doi" &&
-              renderPlaceholderTab("Paste DOI/URL")}
-            {activeTab === "upload-pdf" &&
-              renderPlaceholderTab("Upload PDF")}
-            {activeTab === "sources" && renderPlaceholderTab("Sources")}
+            {activeTab === "search-papers" && renderSearchPapersTab()}
+            {activeTab === "paste-doi" && renderPasteDoiTab()}
+            {activeTab === "upload-pdf" && renderUploadPdfTab()}
+            {activeTab === "sources" && renderSourcesTab()}
           </div>
 
           {/* Footer */}
@@ -694,36 +1419,70 @@ export function AddSourcesModal({
               borderTop: "var(--hairline)",
               padding: "10px 16px",
               display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
+              flexDirection: "column",
+              gap: 6,
               flexShrink: 0,
             }}
           >
-            <span
+            {compileError && (
+              <div
+                style={{
+                  fontSize: "var(--text-12)",
+                  color: "var(--danger)",
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                {compileError}
+              </div>
+            )}
+            <div
               style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: "var(--text-12)",
-                color: "var(--fg-muted)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
               }}
             >
-              {queuedPapers.length} paper{queuedPapers.length !== 1 ? "s" : ""} queued
-            </span>
-            <button
-              disabled={queuedPapers.length === 0}
-              style={{
-                background: queuedPapers.length > 0 ? "var(--accent)" : "var(--border)",
-                color: queuedPapers.length > 0 ? "var(--bg)" : "var(--fg-faint)",
-                border: "none",
-                borderRadius: "var(--r-md)",
-                padding: "7px 14px",
-                fontFamily: "var(--font-mono)",
-                fontSize: "var(--text-12)",
-                fontWeight: 600,
-                cursor: queuedPapers.length > 0 ? "pointer" : "not-allowed",
-              }}
-            >
-              Compile &amp; add
-            </button>
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "var(--text-12)",
+                  color:
+                    queuedPapers.length > 0
+                      ? "var(--fg-muted)"
+                      : "var(--fg-faint)",
+                }}
+              >
+                {queuedPapers.length > 0
+                  ? `${queuedPapers.length} paper${queuedPapers.length !== 1 ? "s" : ""} queued`
+                  : "No papers queued"}
+              </span>
+              <button
+                onClick={handleCompileQueued}
+                disabled={queuedPapers.length === 0 || compiling}
+                style={{
+                  background:
+                    queuedPapers.length > 0 && !compiling
+                      ? "var(--accent)"
+                      : "var(--border)",
+                  color:
+                    queuedPapers.length > 0 && !compiling
+                      ? "var(--bg)"
+                      : "var(--fg-faint)",
+                  border: "none",
+                  borderRadius: "var(--r-md)",
+                  padding: "7px 16px",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "var(--text-12)",
+                  fontWeight: 600,
+                  cursor:
+                    queuedPapers.length === 0 || compiling
+                      ? "not-allowed"
+                      : "pointer",
+                }}
+              >
+                {compiling ? "Adding..." : "Compile & add"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
