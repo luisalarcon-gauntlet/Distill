@@ -109,9 +109,8 @@ describe("components/shared/types.ts — COURSE_COLORS", () => {
 
 describe("lib/config.ts — BrainConfig course fields", () => {
   it("BrainConfig in lib/config.ts accepts courseCode, semester, courseColor", async () => {
-    const { BrainConfig: _ } = await import("./config");
-    // If BrainConfig is missing the fields, TypeScript compile fails.
-    // At runtime, verify that a brain object with new fields can be typed.
+    // BrainConfig is a type-only export — we verify the shape at the type level.
+    // At runtime, verify that a brain object with new fields can be constructed.
     const brain: import("./config").BrainConfig = {
       id: "lib-test",
       name: "Lib Test Brain",

@@ -7,7 +7,21 @@ export interface BrainConfig {
   topic: string;
   created: string;
   lastOpened: string;
+  courseCode?: string;
+  semester?: string;
+  courseColor?: string;
 }
+
+export const COURSE_COLORS = {
+  violet: "#c4a1ff",
+  amber:  "#ffb86b",
+  sage:   "#7ec99a",
+  rose:   "#f4a3b8",
+  sky:    "#8ecae6",
+  citrus: "#d4d45a",
+} as const;
+
+export type CourseColorKey = keyof typeof COURSE_COLORS;
 
 export interface WikiPage {
   id: string;

@@ -14,6 +14,9 @@ export interface BrainConfig {
   topic: string;
   created: string;
   lastOpened: string;
+  courseCode?: string;
+  semester?: string;
+  courseColor?: string;
 }
 
 interface ConfigFile {
