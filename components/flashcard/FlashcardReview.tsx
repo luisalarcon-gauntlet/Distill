@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Flashcard, Screen } from "@/components/shared/types";
+import { Icon } from "@/components/shared/Icon";
 
 interface FlashcardReviewProps {
   brainId: string;
@@ -29,7 +30,7 @@ export function FlashcardReview({ brainId, onNavigate }: FlashcardReviewProps) {
       const data = await res.json();
       setCards(Array.isArray(data) ? data : data.cards ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error loading flashcards");
+      setError(err instanceof Error ? err.message : "Could not load cards.");
     } finally {
       setLoading(false);
     }
@@ -97,7 +98,7 @@ export function FlashcardReview({ brainId, onNavigate }: FlashcardReviewProps) {
     return (
       <div style={{ padding: "22px 24px", display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-13)", color: "var(--fg-muted)" }}>
-          Loading flashcards...
+          Loading cards
         </span>
       </div>
     );
@@ -156,9 +157,8 @@ export function FlashcardReview({ brainId, onNavigate }: FlashcardReviewProps) {
           minHeight: "50vh",
           textAlign: "center",
         }}>
-          <span style={{ fontSize: "24px", color: "var(--success)", lineHeight: 1 }}>✓</span>
           <div style={{ fontFamily: "var(--font-mono)", fontSize: "22px", color: "var(--fg-strong)", fontWeight: 600 }}>
-            Deck complete
+            Deck complete.
           </div>
           <div style={{ fontFamily: "var(--font-sans)", fontSize: "var(--text-13)", color: "var(--fg-muted)" }}>
             You rated all {cards.length} cards.
@@ -216,9 +216,13 @@ export function FlashcardReview({ brainId, onNavigate }: FlashcardReviewProps) {
             border: "none",
             cursor: "pointer",
             padding: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
           }}
         >
-          &larr; Back to course
+          <Icon name="chevron-left" size={16} />
+          Back to course
         </button>
         <button
           onClick={() => onNavigate("dashboard")}
@@ -289,34 +293,34 @@ export function FlashcardReview({ brainId, onNavigate }: FlashcardReviewProps) {
           disabled={currentIndex === 0}
           aria-label="Previous card"
           style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "18px",
             color: currentIndex === 0 ? "var(--fg-faint)" : "var(--fg-muted)",
             background: "transparent",
             border: "none",
             cursor: currentIndex === 0 ? "not-allowed" : "pointer",
             lineHeight: 1,
             padding: "4px 8px",
+            display: "flex",
+            alignItems: "center",
           }}
         >
-          ←
+          <Icon name="chevron-left" size={16} />
         </button>
         <button
           onClick={handleNext}
           disabled={currentIndex === cards.length - 1}
           aria-label="Next card"
           style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "18px",
             color: currentIndex === cards.length - 1 ? "var(--fg-faint)" : "var(--fg-muted)",
             background: "transparent",
             border: "none",
             cursor: currentIndex === cards.length - 1 ? "not-allowed" : "pointer",
             lineHeight: 1,
             padding: "4px 8px",
+            display: "flex",
+            alignItems: "center",
           }}
         >
-          →
+          <Icon name="chevron-right" size={16} />
         </button>
       </div>
 
@@ -335,8 +339,13 @@ export function FlashcardReview({ brainId, onNavigate }: FlashcardReviewProps) {
               border: "1px solid color-mix(in srgb, var(--danger) 20%, transparent)",
               borderRadius: "var(--r-md)",
               cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
             }}
           >
+            <Icon name="x" size={14} />
             Miss
           </button>
           <button
@@ -351,9 +360,14 @@ export function FlashcardReview({ brainId, onNavigate }: FlashcardReviewProps) {
               border: "1px solid color-mix(in srgb, var(--success) 20%, transparent)",
               borderRadius: "var(--r-md)",
               cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
             }}
           >
-            Got
+            <Icon name="check" size={14} />
+            Got it
           </button>
         </div>
       )}

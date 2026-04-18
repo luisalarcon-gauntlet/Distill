@@ -3,6 +3,8 @@
 import { useState, useEffect, useReducer, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import type { Paper, WikiPage } from "@/components/shared/types";
+import { Icon } from "@/components/shared/Icon";
+import type { IconName } from "@/components/shared/Icon";
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -23,12 +25,12 @@ type ModalTab =
   | "upload-pdf"
   | "sources";
 
-const TABS: { id: ModalTab; label: string }[] = [
-  { id: "auto-research", label: "Auto-research" },
-  { id: "search-papers", label: "Search papers" },
-  { id: "paste-doi", label: "Paste DOI/URL" },
-  { id: "upload-pdf", label: "Upload PDF" },
-  { id: "sources", label: "Sources" },
+const TABS: { id: ModalTab; label: string; icon: IconName }[] = [
+  { id: "auto-research", label: "Auto-research", icon: "sparkles" },
+  { id: "search-papers", label: "Search papers", icon: "search" },
+  { id: "paste-doi", label: "Paste DOI/URL", icon: "link" },
+  { id: "upload-pdf", label: "Upload PDF", icon: "upload" },
+  { id: "sources", label: "Sources", icon: "layers" },
 ];
 
 // ─── Source badge constants ───────────────────────────────────────────────────
@@ -1390,8 +1392,12 @@ export function AddSourcesModal({
                     letterSpacing: "var(--track-label)",
                     cursor: "pointer",
                     whiteSpace: "nowrap",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
                   }}
                 >
+                  <Icon name={tab.icon} size={14} />
                   {tab.label}
                 </button>
               );

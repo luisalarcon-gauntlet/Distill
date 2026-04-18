@@ -5,6 +5,7 @@ import { BrainConfig, Screen, WikiPage } from "@/components/shared/types";
 import { CourseCard, NewCourseCard } from "@/components/dashboard/CourseCard";
 import { WeekAheadSidebar } from "@/components/dashboard/WeekAheadSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { Icon } from "@/components/shared/Icon";
 
 interface DashboardScreenProps {
   onNavigate: (screen: Screen, brainId?: string) => void;
@@ -48,7 +49,7 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
           setPageCounts({});
         }
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Unknown error loading courses");
+        setError(err instanceof Error ? err.message : "Could not load courses. Check your setup.");
       } finally {
         setLoading(false);
       }
@@ -128,8 +129,12 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
             borderRadius: "var(--r-md)",
             padding: "6px 10px",
             cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
           }}
         >
+          <Icon name="upload" size={14} />
           Import syllabus
         </button>
         <ThemeToggle />
@@ -147,7 +152,7 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
         >
           {loading && (
             <p style={{ fontFamily: "var(--font-sans)", fontSize: "var(--text-13)", color: "var(--fg-faint)" }}>
-              Loading courses...
+              Loading courses
             </p>
           )}
           {error && (

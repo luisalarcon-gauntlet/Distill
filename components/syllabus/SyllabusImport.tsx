@@ -2,6 +2,7 @@
 
 import { useReducer, useRef, useEffect } from "react";
 import type { Screen } from "@/components/shared/types";
+import { Icon } from "@/components/shared/Icon";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -448,17 +449,16 @@ export function SyllabusImport({ onNavigate }: SyllabusImportProps) {
               </div>
             ) : (
               <>
-                {/* Plus icon — hidden while dragging */}
+                {/* Upload icon — hidden while dragging */}
                 {!isDragging && (
                   <div
                     style={{
-                      fontSize: "28px",
                       color: "var(--fg-muted)",
                       lineHeight: 1,
                       marginBottom: "6px",
                     }}
                   >
-                    +
+                    <Icon name="upload" size={24} />
                   </div>
                 )}
 
@@ -745,9 +745,13 @@ export function SyllabusImport({ onNavigate }: SyllabusImportProps) {
                   cursor:
                     phase.edited.courseName.trim() === "" ? "not-allowed" : "pointer",
                   transition: "background 0.15s var(--ease)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
                 }}
               >
-                Create notebook &rarr;
+                <Icon name="graduation-cap" size={14} />
+                Create notebook
               </button>
             </div>
           </div>

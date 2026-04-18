@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { BrainConfig, COURSE_COLORS } from "@/components/shared/types";
+import { Icon } from "@/components/shared/Icon";
 
 // T-02-04 mitigation: only inject colors that are known COURSE_COLORS hex values
 const VALID_COURSE_COLOR_VALUES = new Set(Object.values(COURSE_COLORS));
@@ -88,15 +89,19 @@ export function CourseCard({ brain, pageCount, index, onClick }: CourseCardProps
         {brain.name}
       </div>
 
-      {/* Bottom row: page count + path hint */}
+      {/* Bottom row: page count chip + path hint */}
       <div
         style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "4px",
           fontFamily: "var(--font-sans)",
           fontSize: "var(--text-11)",
           color: "var(--fg-faint)",
           marginTop: "6px",
         }}
       >
+        <Icon name="file-text" size={12} />
         {pageCount} {pageCount === 1 ? "page" : "pages"} &middot; {shortPath}
       </div>
     </div>
@@ -124,10 +129,12 @@ export function NewCourseCard({ onClick }: NewCourseCardProps) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        gap: "6px",
         minHeight: "82px",
         transition: "background-color 0.12s ease",
       }}
     >
+      <Icon name="plus" size={14} />
       <span
         style={{
           fontFamily: "var(--font-mono)",
@@ -135,7 +142,7 @@ export function NewCourseCard({ onClick }: NewCourseCardProps) {
           color: "var(--fg-faint)",
         }}
       >
-        + New course
+        New course
       </span>
     </div>
   );

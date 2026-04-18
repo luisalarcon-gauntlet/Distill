@@ -1,6 +1,7 @@
 "use client";
 
 import type { BrainConfig, WikiPage, LogEntry, Screen } from "@/components/shared/types";
+import { Icon } from "@/components/shared/Icon";
 
 interface CourseSidebarProps {
   brain: BrainConfig;
@@ -48,6 +49,13 @@ const LOG_ACTION_COLOR: Record<string, string> = {
 };
 
 const SIDEBAR_WIDTH = 280;
+
+// Tab icon mapping — paired with visible label, so icon aids not replaces
+const TAB_ICONS = {
+  pages: "book",
+  assignments: "flag",
+  log: "clock",
+} as const;
 
 export function CourseSidebar({
   brain,
@@ -162,9 +170,14 @@ export function CourseSidebar({
             fontWeight: 600,
             cursor: "pointer",
             textAlign: "center",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "6px",
           }}
         >
-          + Add sources
+          <Icon name="plus" size={14} />
+          Add sources
         </button>
       </div>
 
@@ -225,6 +238,11 @@ export function CourseSidebar({
       >
         {tabs.map((tab) => {
           const isActive = activeTab === tab;
+          const TAB_LABELS: Record<typeof tab, string> = {
+            pages: "Pages",
+            assignments: "Assignments",
+            log: "Log",
+          };
           return (
             <button
               key={tab}
@@ -241,9 +259,14 @@ export function CourseSidebar({
                 textTransform: "uppercase",
                 cursor: "pointer",
                 letterSpacing: "0.05em",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "4px",
               }}
             >
-              {tab}
+              <Icon name={TAB_ICONS[tab]} size={14} />
+              {TAB_LABELS[tab]}
             </button>
           );
         })}

@@ -1,6 +1,7 @@
 "use client";
 
 import { BrainConfig } from "@/components/shared/types";
+import { Icon } from "@/components/shared/Icon";
 
 interface WeekAheadSidebarProps {
   brains: BrainConfig[];
@@ -58,14 +59,18 @@ export function WeekAheadSidebar({ brains }: WeekAheadSidebarProps) {
                 padding: "6px 16px",
               }}
             >
-              {/* Day label row */}
+              {/* Day label row with calendar icon */}
               <div
                 style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
                   fontFamily: "var(--font-mono)",
                   fontSize: "var(--text-11)",
                   color: isToday ? "var(--fg-strong)" : "var(--fg-muted)",
                 }}
               >
+                <Icon name="calendar" size={12} />
                 {dayLabel} {dateNum}
               </div>
               {/* Placeholder content until Phase 4 exam prep sessions */}
