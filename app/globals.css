@@ -291,12 +291,12 @@ hr {
 .card-flip {
   perspective: 1000px;
   cursor: pointer;
-  min-height: 160px;
+  min-height: 280px;
 }
 .card-inner {
   position: relative;
   width: 100%;
-  min-height: 160px;
+  min-height: 280px;
   transition: transform 0.45s cubic-bezier(0.25, 0.1, 0.25, 1);
   transform-style: preserve-3d;
   -webkit-transform-style: preserve-3d;
@@ -314,10 +314,11 @@ hr {
   background: var(--surface);
   border: var(--hairline);
   border-radius: 10px;
-  padding: 28px 22px;
+  padding: 32px 28px;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  overflow-y: auto;
 }
 .card-back {
   transform: rotateY(180deg);
@@ -329,17 +330,19 @@ hr {
   color: var(--fg-muted);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
 }
 .card-body {
-  font-size: 17px;
+  font-size: 18px;
   color: var(--fg-strong);
-  line-height: 1.5;
+  line-height: 1.6;
   font-family: var(--font-sans);
 }
 .card-source {
   font-family: var(--font-mono);
   font-size: var(--text-11);
   color: var(--fg-faint);
-  margin-top: 14px;
+  margin-top: 16px;
+  flex-shrink: 0;
 }

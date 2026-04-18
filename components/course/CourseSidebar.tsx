@@ -12,6 +12,8 @@ interface CourseSidebarProps {
   onPageSelect: (id: string) => void;
   onOpenModal: () => void;
   onNavigate: (screen: Screen, brainId?: string) => void;
+  onGenerateFlashcards: () => void;
+  generatingFlashcards: boolean;
 }
 
 // Page type sort order
@@ -57,6 +59,8 @@ export function CourseSidebar({
   onPageSelect,
   onOpenModal,
   onNavigate,
+  onGenerateFlashcards,
+  generatingFlashcards,
 }: CourseSidebarProps) {
   const sortedPages = [...pages].sort((a, b) => {
     const orderA = PAGE_TYPE_ORDER[a.type] ?? 99;
@@ -164,30 +168,50 @@ export function CourseSidebar({
         </button>
       </div>
 
-      {/* Secondary action: Review flashcards */}
+      {/* Secondary actions: Generate + Review flashcards */}
       <div
         style={{
           padding: "8px 12px 10px",
           borderBottom: "1px solid #1e1e2e",
+          display: "flex",
+          gap: "6px",
         }}
       >
+        <button
+          onClick={onGenerateFlashcards}
+          disabled={generatingFlashcards}
+          style={{
+            flex: 1,
+            background: "var(--accent-10)",
+            color: "var(--accent)",
+            border: "1px solid var(--accent-25)",
+            borderRadius: 6,
+            padding: "6px 12px",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            cursor: generatingFlashcards ? "default" : "pointer",
+            textAlign: "center",
+            opacity: generatingFlashcards ? 0.6 : 1,
+          }}
+        >
+          {generatingFlashcards ? "Generating..." : "Generate cards"}
+        </button>
         <button
           onClick={() => onNavigate("flashcards", brain.id)}
           style={{
             flex: 1,
-            width: "100%",
             background: "rgba(144,196,255,0.1)",
-            color: "#90c4ff",
+            color: "var(--link)",
             border: "1px solid rgba(144,196,255,0.2)",
             borderRadius: 6,
             padding: "6px 12px",
-            fontFamily: "IBM Plex Mono, monospace",
-            fontSize: 12,
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
             cursor: "pointer",
             textAlign: "center",
           }}
         >
-          Review flashcards
+          Review cards
         </button>
       </div>
 

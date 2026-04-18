@@ -62,6 +62,24 @@ export function CourseViewer({ brainId, onNavigate }: CourseViewerProps) {
     }
   }, [brainId]);
 
+  // Flashcard generation
+  const [generatingFlashcards, setGeneratingFlashcards] = useState(false);
+  const handleGenerateFlashcards = useCallback(async () => {
+    if (!brainId) return;
+    setGeneratingFlashcards(true);
+    try {
+      await fetch(`/api/brains/${brainId}/flashcards`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ count: 30 }),
+      });
+    } catch {
+      // non-fatal
+    } finally {
+      setGeneratingFlashcards(false);
+    }
+  }, [brainId]);
+
   // Wiki link navigation — exact ID, slug, or fuzzy title match
   const handleNavigate = useCallback(
     (target: string) => {
@@ -165,6 +183,8 @@ export function CourseViewer({ brainId, onNavigate }: CourseViewerProps) {
         onPageSelect={setActivePage}
         onOpenModal={() => setModalOpen(true)}
         onNavigate={onNavigate}
+        onGenerateFlashcards={handleGenerateFlashcards}
+        generatingFlashcards={generatingFlashcards}
       />
 
       {/* Main content area */}

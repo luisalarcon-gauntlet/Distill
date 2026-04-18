@@ -26,8 +26,8 @@ export function FlashcardReview({ brainId, onNavigate }: FlashcardReviewProps) {
         const data = await res.json();
         throw new Error(data.error ?? `Failed to load flashcards (${res.status})`);
       }
-      const data: Flashcard[] = await res.json();
-      setCards(data);
+      const data = await res.json();
+      setCards(Array.isArray(data) ? data : data.cards ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error loading flashcards");
     } finally {
@@ -141,12 +141,12 @@ export function FlashcardReview({ brainId, onNavigate }: FlashcardReviewProps) {
   }
 
   const card = cards[currentIndex];
-  const progressPercent = ((currentIndex + 1) / cards.length) * 100;
+  const progressPercent = cards.length > 0 ? ((currentIndex + 1) / cards.length) * 100 : 0;
 
-  // ── Deck complete ──
-  if (completed) {
+  // ── Deck complete or card out of bounds ──
+  if (completed || !card) {
     return (
-      <div style={{ padding: "22px 24px", maxWidth: "560px", margin: "0 auto" }}>
+      <div style={{ padding: "22px 24px", maxWidth: "720px", margin: "0 auto" }}>
         <div style={{
           display: "flex",
           flexDirection: "column",
@@ -202,7 +202,39 @@ export function FlashcardReview({ brainId, onNavigate }: FlashcardReviewProps) {
 
   // ── Main review ──
   return (
-    <div style={{ padding: "22px 24px", maxWidth: "560px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "10px" }}>
+    <div style={{ padding: "22px 24px", maxWidth: "720px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "10px" }}>
+
+      {/* Back link */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <button
+          onClick={() => onNavigate("course", brainId)}
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-12)",
+            color: "var(--fg-muted)",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          &larr; Back to course
+        </button>
+        <button
+          onClick={() => onNavigate("dashboard")}
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-11)",
+            color: "var(--fg-faint)",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          Dashboard
+        </button>
+      </div>
 
       {/* Progress row */}
       <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
