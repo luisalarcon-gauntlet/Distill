@@ -1,17 +1,18 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { BrainConfig, WikiPage, LogEntry, Screen } from "@/components/shared/types";
+import type { BrainConfig, WikiPage, LogEntry, Screen, ExamPrepSession } from "@/components/shared/types";
 import { PageView } from "@/components/shared/PageView";
 import { CourseSidebar } from "@/components/course/CourseSidebar";
+import { AddSourcesModal } from "@/components/course/AddSourcesModal";
+import { AssignmentPanel } from "@/components/course/AssignmentPanel";
 
 interface CourseViewerProps {
   brainId: string;
   onNavigate: (screen: Screen, brainId?: string) => void;
-  onOpenModal: () => void;
 }
 
-export function CourseViewer({ brainId, onNavigate, onOpenModal }: CourseViewerProps) {
+export function CourseViewer({ brainId, onNavigate }: CourseViewerProps) {
   const [brain, setBrain] = useState<BrainConfig | null>(null);
   const [pages, setPages] = useState<WikiPage[]>([]);
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -19,6 +20,8 @@ export function CourseViewer({ brainId, onNavigate, onOpenModal }: CourseViewerP
   const [sidebarTab, setSidebarTab] = useState<"pages" | "assignments" | "log">("pages");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [examSessions, setExamSessions] = useState<ExamPrepSession[]>([]);
 
   useEffect(() => {
     if (!brainId) return;
@@ -32,9 +35,31 @@ export function CourseViewer({ brainId, onNavigate, onOpenModal }: CourseViewerP
         setLog(data.log || []);
         const overview = (data.pages || []).find((p: WikiPage) => p.type === "overview");
         setActivePage(overview?.id || data.pages?.[0]?.id || null);
+
+        // Load exam sessions — non-fatal if endpoint not yet implemented
+        fetch(`/api/brains/${brainId}/exam-prep`)
+          .then((r) => r.json())
+          .then((epData) => {
+            if (!epData.error) {
+              setExamSessions(Array.isArray(epData) ? epData : []);
+            }
+          })
+          .catch(() => {
+            // Non-fatal: exam-prep endpoint may not exist yet
+          });
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+  }, [brainId]);
+
+  // Reload brain data after ingest completes
+  const reloadBrain = useCallback(async () => {
+    const res = await fetch(`/api/brains/${brainId}`);
+    const data = await res.json();
+    if (!data.error) {
+      setPages(data.pages || []);
+      setLog(data.log || []);
+    }
   }, [brainId]);
 
   // Wiki link navigation — exact ID, slug, or fuzzy title match
@@ -73,7 +98,7 @@ export function CourseViewer({ brainId, onNavigate, onOpenModal }: CourseViewerP
           justifyContent: "center",
           fontFamily: "IBM Plex Mono, monospace",
           fontSize: 13,
-          color: "#4a4a5c",
+          color: "var(--fg-muted)",
         }}
       >
         Loading...
@@ -97,7 +122,7 @@ export function CourseViewer({ brainId, onNavigate, onOpenModal }: CourseViewerP
           style={{
             fontFamily: "IBM Plex Mono, monospace",
             fontSize: 13,
-            color: "#d46a6a",
+            color: "var(--danger)",
           }}
         >
           {error}
@@ -106,12 +131,12 @@ export function CourseViewer({ brainId, onNavigate, onOpenModal }: CourseViewerP
           onClick={() => setError(null)}
           style={{
             background: "none",
-            border: "1px solid #2a2a3e",
+            border: "1px solid var(--border)",
             borderRadius: 6,
             padding: "5px 14px",
             fontFamily: "IBM Plex Mono, monospace",
             fontSize: 11,
-            color: "#4a4a5c",
+            color: "var(--fg-muted)",
             cursor: "pointer",
           }}
         >
@@ -138,7 +163,7 @@ export function CourseViewer({ brainId, onNavigate, onOpenModal }: CourseViewerP
         activeTab={sidebarTab}
         onTabChange={setSidebarTab}
         onPageSelect={setActivePage}
-        onOpenModal={onOpenModal}
+        onOpenModal={() => setModalOpen(true)}
         onNavigate={onNavigate}
       />
 
@@ -150,18 +175,7 @@ export function CourseViewer({ brainId, onNavigate, onOpenModal }: CourseViewerP
         }}
       >
         {sidebarTab === "assignments" ? (
-          // Assignments panel placeholder — wired in Plan 04
-          <div
-            style={{
-              maxWidth: 780,
-              padding: "48px 48px 80px",
-              fontFamily: "IBM Plex Mono, monospace",
-              fontSize: 13,
-              color: "#4a4a5c",
-            }}
-          >
-            Assignment cross-reference coming soon.
-          </div>
+          <AssignmentPanel pages={pages} examSessions={examSessions} />
         ) : currentPage ? (
           <div style={{ maxWidth: 780, padding: "48px 48px 80px" }}>
             <PageView page={currentPage} onNavigate={handleNavigate} />
@@ -175,7 +189,7 @@ export function CourseViewer({ brainId, onNavigate, onOpenModal }: CourseViewerP
               minHeight: "100vh",
               fontFamily: "IBM Plex Mono, monospace",
               fontSize: 13,
-              color: "#4a4a5c",
+              color: "var(--fg-muted)",
               textAlign: "center",
             }}
           >
@@ -183,6 +197,15 @@ export function CourseViewer({ brainId, onNavigate, onOpenModal }: CourseViewerP
           </div>
         )}
       </div>
+
+      {/* Add Sources Modal — portal renders to document.body */}
+      <AddSourcesModal
+        open={modalOpen}
+        brainId={brainId}
+        pages={pages}
+        onClose={() => setModalOpen(false)}
+        onIngestComplete={reloadBrain}
+      />
     </div>
   );
 }

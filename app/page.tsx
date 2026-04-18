@@ -4,6 +4,10 @@ import { useState } from "react";
 import { Screen } from "@/components/shared/types";
 import { DashboardScreen } from "@/components/dashboard/DashboardScreen";
 import { SyllabusImport } from "@/components/syllabus/SyllabusImport";
+import { CourseViewer } from "@/components/course/CourseViewer";
+
+// WikiApp.tsx is preserved for Phase 6 audit but no longer serves any screen.
+// Decomposed into: DashboardScreen, SyllabusImport, CourseViewer (+ CourseSidebar, AddSourcesModal, AssignmentPanel)
 
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("dashboard");
@@ -18,7 +22,10 @@ export default function Home() {
     return <SyllabusImport onNavigate={handleNavigate} />;
   }
 
+  if (screen === "course" && activeBrainId) {
+    return <CourseViewer brainId={activeBrainId} onNavigate={handleNavigate} />;
+  }
+
   // Default: dashboard (covers "dashboard" and any screen not yet implemented)
-  // activeBrainId is stored for Phase 4 (course viewer) to use
   return <DashboardScreen onNavigate={handleNavigate} />;
 }
