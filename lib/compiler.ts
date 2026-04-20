@@ -757,6 +757,52 @@ Return ONLY valid JSON matching this shape, no markdown fences:
  * Compile a full course curriculum wiki from a parsed syllabus structure and
  * a set of classified PDFs with their extracted text.
  *
+/**
+ * Extract key dates and deadlines from syllabus text via LLM.
+ * Returns an array of { date, event, type } objects.
+ */
+export async function extractDeadlines(
+  syllabusText: string
+): Promise<{
+  result: Array<{ date: string; event: string; type: string }>;
+  usage: TokenUsage;
+}> {
+  const prompt = `Extract all key dates, deadlines, and events from this syllabus text.
+
+Syllabus text:
+${syllabusText.slice(0, 15000)}
+
+Return JSON:
+{
+  "deadlines": [
+    { "date": "YYYY-MM-DD", "event": "Problem Set 1 due", "type": "assignment|exam|project|lecture|other" }
+  ]
+}
+
+Rules:
+- Extract every date with a deadline, exam, due date, or event
+- Use ISO date format YYYY-MM-DD
+- type must be one of: assignment, exam, project, lecture, other
+- Include problem sets, homeworks, midterms, finals, project deadlines, presentations
+- If a time is mentioned, include it in the event string
+- Order by date ascending
+- If the year is not explicit, infer from context (semester dates, etc.)`;
+
+  try {
+    const { data, usage } = await llmJSON<{
+      deadlines: Array<{ date: string; event: string; type: string }>;
+    }>(
+      "You extract structured dates from academic syllabi. Return ONLY valid JSON, no markdown fences.",
+      prompt,
+      4096
+    );
+    return { result: data.deadlines || [], usage };
+  } catch {
+    return { result: [], usage: { ...ZERO_USAGE } };
+  }
+}
+
+/**
  * Returns the same shape as `compileWiki`. Resilient to malformed LLM
  * responses — returns `{ pages: {} }` with whatever usage was consumed rather
  * than throwing.

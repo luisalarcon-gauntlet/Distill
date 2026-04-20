@@ -5,6 +5,7 @@ import {
   registerBrain,
   type BrainConfig,
 } from "@/lib/config";
+import { COURSE_COLORS, type CourseColorKey } from "@/components/shared/types";
 import {
   initWikiDir,
   savePDFSource,
@@ -94,6 +95,25 @@ export async function POST(request: Request) {
       created: now,
       lastOpened: now,
     };
+    registerBrain(brain);
+
+    // ── Enrich brain with optional course metadata from form fields ────────
+    const courseCodeField = formData.get("courseCode");
+    const semesterField = formData.get("semester");
+    const colorKeys = Object.keys(COURSE_COLORS) as CourseColorKey[];
+    brain.courseColor = colorKeys[id.charCodeAt(0) % colorKeys.length];
+    if (typeof courseCodeField === "string" && courseCodeField.trim()) {
+      brain.courseCode = courseCodeField.trim();
+    }
+    if (typeof semesterField === "string" && semesterField.trim()) {
+      brain.semester = semesterField.trim();
+    }
+    const deadlinesField = formData.get("deadlines");
+    if (typeof deadlinesField === "string" && deadlinesField.trim()) {
+      try {
+        brain.deadlines = JSON.parse(deadlinesField);
+      } catch { /* ignore malformed deadlines */ }
+    }
     registerBrain(brain);
 
     appendLog(

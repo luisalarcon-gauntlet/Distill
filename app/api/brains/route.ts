@@ -3,6 +3,7 @@ import {
   listBrains,
   registerBrain,
   generateBrainId,
+  BrainConfig,
 } from "@/lib/config";
 import { initWikiDir, appendLog } from "@/lib/wiki-fs";
 import { searchAllSources } from "@/lib/papers";
@@ -42,11 +43,34 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, topic, directory, sourceCount } = body;
+    const { name, topic, directory, sourceCount, courseCode, semester, courseColor } = body;
 
     if (!name || !directory) {
       return NextResponse.json(
         { error: "name and directory are required" },
+        { status: 400 }
+      );
+    }
+
+    // T-02-01: courseColor must be a string of ≤ 20 chars (prevents log injection)
+    if (courseColor !== undefined && (typeof courseColor !== "string" || courseColor.length > 20)) {
+      return NextResponse.json(
+        { error: "courseColor must be a string of at most 20 characters" },
+        { status: 400 }
+      );
+    }
+
+    // T-02-02: courseCode and semester are capped at 30 chars (prevents bloated config.json)
+    if (courseCode !== undefined && (typeof courseCode !== "string" || courseCode.length > 30)) {
+      return NextResponse.json(
+        { error: "courseCode must be a string of at most 30 characters" },
+        { status: 400 }
+      );
+    }
+
+    if (semester !== undefined && (typeof semester !== "string" || semester.length > 30)) {
+      return NextResponse.json(
+        { error: "semester must be a string of at most 30 characters" },
         { status: 400 }
       );
     }
@@ -93,13 +117,16 @@ export async function POST(request: Request) {
     }
 
     const now = new Date().toISOString();
-    const brain = {
+    const brain: BrainConfig = {
       id,
       name,
       path: brainPath,
       topic: searchTopic,
       created: now,
       lastOpened: now,
+      ...(courseCode ? { courseCode } : {}),
+      ...(semester   ? { semester }   : {}),
+      ...(courseColor ? { courseColor } : {}),
     };
 
     registerBrain(brain);

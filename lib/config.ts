@@ -7,6 +7,12 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
+export interface CourseDeadline {
+  date: string;
+  event: string;
+  type: "assignment" | "exam" | "project" | "lecture" | "other";
+}
+
 export interface BrainConfig {
   id: string;
   name: string;
@@ -14,6 +20,10 @@ export interface BrainConfig {
   topic: string;
   created: string;
   lastOpened: string;
+  courseCode?: string;
+  semester?: string;
+  courseColor?: string;
+  deadlines?: CourseDeadline[];
 }
 
 interface ConfigFile {
