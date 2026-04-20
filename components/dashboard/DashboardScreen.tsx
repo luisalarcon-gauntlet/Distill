@@ -188,6 +188,12 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
                   pageCount={pageCounts[brain.id] ?? 0}
                   index={i}
                   onClick={() => onNavigate("course", brain.id)}
+                  onRemove={async () => {
+                    try {
+                      await fetch(`/api/brains/${brain.id}`, { method: "DELETE" });
+                      setBrains((prev) => prev.filter((b) => b.id !== brain.id));
+                    } catch { /* non-fatal */ }
+                  }}
                 />
               ))}
               <NewCourseCard onClick={() => onNavigate("import")} />

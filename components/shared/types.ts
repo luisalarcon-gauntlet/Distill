@@ -1,5 +1,11 @@
 // Shared types for Distill undergrad pivot. All screen components import from here.
 
+export interface CourseDeadline {
+  date: string;       // YYYY-MM-DD
+  event: string;      // "Problem Set 1 due", "Midterm exam", etc.
+  type: "assignment" | "exam" | "project" | "lecture" | "other";
+}
+
 export interface BrainConfig {
   id: string;
   name: string;
@@ -10,6 +16,7 @@ export interface BrainConfig {
   courseCode?: string;
   semester?: string;
   courseColor?: string;
+  deadlines?: CourseDeadline[];
 }
 
 export const COURSE_COLORS = {

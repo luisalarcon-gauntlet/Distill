@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { extractTextFromBuffer } from "@/lib/pdf";
-import { parseSyllabus } from "@/lib/compiler";
+import { parseSyllabus, extractDeadlines } from "@/lib/compiler";
 
 /**
  * POST /api/syllabus/parse
@@ -53,9 +53,16 @@ export async function POST(request: Request) {
     }
 
     // Parse the syllabus via LLM (5-15 second operation)
-    const { result } = await parseSyllabus(text);
+    // Run both in parallel — structure + deadlines
+    const [syllabusResult, deadlinesResult] = await Promise.all([
+      parseSyllabus(text),
+      extractDeadlines(text),
+    ]);
 
-    return NextResponse.json({ curriculum: result });
+    return NextResponse.json({
+      curriculum: syllabusResult.result,
+      deadlines: deadlinesResult.result,
+    });
   } catch (err: any) {
     // T-03-03: Return generic message to client; full error is logged server-side only
     console.error("[syllabus/parse] Unexpected error:", err);

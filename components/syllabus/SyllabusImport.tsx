@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useRef, useEffect } from "react";
+import { useReducer, useRef, useEffect, useState } from "react";
 import type { Screen } from "@/components/shared/types";
 import { Icon } from "@/components/shared/Icon";
 
@@ -31,8 +31,8 @@ type ImportPhase =
   | { step: "idle" }
   | { step: "uploading"; file: File }
   | { step: "extracting"; file: File }
-  | { step: "reviewing"; file: File; curriculum: CurriculumStructure; edited: EditableFields }
-  | { step: "creating"; file: File; edited: EditableFields }
+  | { step: "reviewing"; file: File; curriculum: CurriculumStructure; edited: EditableFields; deadlines: Array<{ date: string; event: string; type: string }> }
+  | { step: "creating"; file: File; edited: EditableFields; deadlines: Array<{ date: string; event: string; type: string }> }
   | { step: "done" }
   | { step: "error"; message: string };
 
@@ -43,7 +43,7 @@ type ImportPhase =
 type Action =
   | { type: "DROP_FILE"; file: File }
   | { type: "START_EXTRACT" }
-  | { type: "EXTRACT_SUCCESS"; curriculum: CurriculumStructure }
+  | { type: "EXTRACT_SUCCESS"; curriculum: CurriculumStructure; deadlines: Array<{ date: string; event: string; type: string }> }
   | { type: "EDIT_FIELD"; field: keyof EditableFields; value: string }
   | { type: "EXTRACT_ERROR"; message: string }
   | { type: "START_CREATE" }
@@ -75,6 +75,7 @@ function reducer(state: ImportPhase, action: Action): ImportPhase {
         file: state.file,
         curriculum: action.curriculum,
         edited: editableFromCurriculum(action.curriculum),
+        deadlines: action.deadlines || [],
       };
 
     case "EDIT_FIELD":
@@ -89,7 +90,7 @@ function reducer(state: ImportPhase, action: Action): ImportPhase {
 
     case "START_CREATE":
       if (state.step !== "reviewing") return state;
-      return { step: "creating", file: state.file, edited: state.edited };
+      return { step: "creating", file: state.file, edited: state.edited, deadlines: state.deadlines };
 
     case "CREATE_ERROR":
       if (state.step !== "creating") return state;
@@ -130,6 +131,7 @@ export function SyllabusImport({ onNavigate }: SyllabusImportProps) {
   const [isDragging, setIsDragging] = useReducerBool(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const defaultDirectoryRef = useRef<string>("/tmp/distill");
+  const [saveDirectory, setSaveDirectory] = useState<string>("");
   const [creatingMsgIdx, setCreatingMsgIdx] = useReducerNumber(0);
 
   // ---------------------------------------------------------------------------
@@ -144,6 +146,7 @@ export function SyllabusImport({ onNavigate }: SyllabusImportProps) {
           // /api/browse GET returns { current, parent, dirs }
           if (typeof data.current === "string" && data.current) {
             defaultDirectoryRef.current = data.current;
+            setSaveDirectory(data.current);
           }
         }
       } catch {
@@ -190,7 +193,7 @@ export function SyllabusImport({ onNavigate }: SyllabusImportProps) {
         return;
       }
 
-      dispatch({ type: "EXTRACT_SUCCESS", curriculum: data.curriculum });
+      dispatch({ type: "EXTRACT_SUCCESS", curriculum: data.curriculum, deadlines: data.deadlines || [] });
     } catch (err: any) {
       dispatch({
         type: "EXTRACT_ERROR",
@@ -205,16 +208,19 @@ export function SyllabusImport({ onNavigate }: SyllabusImportProps) {
   async function handleConfirm() {
     if (phase.step !== "reviewing") return;
 
-    const { file, edited } = phase;
+    const { file, edited, deadlines } = phase;
     dispatch({ type: "START_CREATE" });
 
     const formData = new FormData();
     formData.append("name", edited.courseName.trim() || "Untitled Course");
     formData.append("topic", edited.instructor.trim() || edited.courseName.trim());
-    formData.append("directory", defaultDirectoryRef.current);
+    formData.append("directory", saveDirectory || defaultDirectoryRef.current);
     formData.append("files", file);
     formData.append("courseCode", edited.courseCode.trim());
     formData.append("semester", edited.semester.trim());
+    if (deadlines.length > 0) {
+      formData.append("deadlines", JSON.stringify(deadlines));
+    }
 
     try {
       const res = await fetch("/api/brains/upload", {
@@ -720,6 +726,12 @@ export function SyllabusImport({ onNavigate }: SyllabusImportProps) {
                 value={phase.edited.semester}
                 placeholder="e.g. Fall 2025"
                 onChange={(v) => dispatch({ type: "EDIT_FIELD", field: "semester", value: v })}
+              />
+              <FieldInput
+                label="Save to"
+                value={saveDirectory}
+                placeholder="/Users/you/school"
+                onChange={(v) => setSaveDirectory(v)}
               />
             </div>
 

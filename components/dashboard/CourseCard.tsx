@@ -22,9 +22,10 @@ interface CourseCardProps {
   pageCount: number;
   index: number;
   onClick: () => void;
+  onRemove: () => void;
 }
 
-export function CourseCard({ brain, pageCount, index, onClick }: CourseCardProps) {
+export function CourseCard({ brain, pageCount, index, onClick, onRemove }: CourseCardProps) {
   const [hovered, setHovered] = useState(false);
 
   const safeAccentColor = resolveSafeAccentColor(brain.courseColor);
@@ -42,6 +43,7 @@ export function CourseCard({ brain, pageCount, index, onClick }: CourseCardProps
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
+        position: "relative",
         background: hovered ? "var(--surface-2)" : "var(--surface)",
         border: "1px solid var(--border)",
         borderLeft: accentBorder,
@@ -51,6 +53,27 @@ export function CourseCard({ brain, pageCount, index, onClick }: CourseCardProps
         transition: "background-color 0.12s ease",
       }}
     >
+      {hovered && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          style={{
+            position: "absolute",
+            bottom: 6,
+            right: 6,
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-10)",
+            color: "var(--danger)",
+            background: "var(--surface)",
+            border: "none",
+            borderRadius: "var(--r-sm)",
+            padding: "2px 6px",
+            cursor: "pointer",
+            zIndex: 1,
+          }}
+        >
+          remove
+        </button>
+      )}
       {/* Top row: course code + semester */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <span

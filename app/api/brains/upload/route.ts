@@ -108,6 +108,12 @@ export async function POST(request: Request) {
     if (typeof semesterField === "string" && semesterField.trim()) {
       brain.semester = semesterField.trim();
     }
+    const deadlinesField = formData.get("deadlines");
+    if (typeof deadlinesField === "string" && deadlinesField.trim()) {
+      try {
+        brain.deadlines = JSON.parse(deadlinesField);
+      } catch { /* ignore malformed deadlines */ }
+    }
     registerBrain(brain);
 
     appendLog(
